@@ -117,6 +117,20 @@ describe('stage 4 UI', () => {
     expect(container.textContent).toContain(bracketDocument.metadata.title);
   });
 
+  it('opens the QR dialog and honestly refuses a code that cannot hold the guide', async () => {
+    await renderApp();
+    await click(byText('QR-код'));
+    expect(container.textContent).toContain('Инструкция в QR');
+    expect(container.textContent).toContain('QR по цеховой ссылке');
+    expect(container.textContent).toContain('Скачать автономный офлайн-пакет');
+    expect(container.textContent).toContain('Экспорт автономного HTML-файла');
+    // The 6-step demo is ~4–5 KB: it cannot be a QR, and the dialog says so instead of pretending.
+    expect(container.textContent).toMatch(/Не помещается в один QR|Упакованы все шаги/);
+    await click(byText('QR по цеховой ссылке'));
+    // Без адреса сервера ссылка деградирует до deep-link приложения — это и должно быть видно.
+    expect(container.textContent).toMatch(/\?guide=|ikguide:\/\/guide\//);
+  });
+
   it('saves «Строгий режим цеха», which hides the editor on a tablet (not in the browser)', async () => {
     await renderApp();
     expect(byText('Инженер')).toBeTruthy();

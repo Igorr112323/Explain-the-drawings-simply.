@@ -220,7 +220,7 @@ FastAPI) и поднимает uvicorn с автоперезагрузкой. OC
 Проверки качества (те же команды, что в CI):
 
 ```bash
-npm test            # Vitest: 241 тест, 23 файла
+npm test            # Vitest: 242 теста, 23 файла
 npm run test:vision # pytest: 98 тестов сервиса распознавания
 npm run test:cad    # pytest: 44 теста сервиса 3D-моделей
 npm run typecheck   # tsc --noEmit, 0 ошибок
@@ -423,7 +423,7 @@ scripts\start-workshop-servers.bat
 | ГОСТ-ядро | `packages/gost-translator/src/**/*.test.ts` (55) | точные значения в мкм, границы диапазонов 3/30 мм, нестандартные шаги, неизвестные поля, пересечения парсеров |
 | Схема | `packages/ikguide-schema/src/schema.test.ts` (26) | валидность, дубликаты, висячие ссылки, порог уверенности, IO, перестановка шагов, блок `assembly3d` (дубли деталей, чужие шаги, активная∩установленная, SVG-проверка) |
 | Сборка черновика | `packages/ikguide-builder/src/builder.test.ts` (18) + `cad.test.ts` (14) | стадии и нумерация, политика инструмента, QC по посадкам, fallback-и без штампа, лимиты, ручные шифры; 3D: ГОСТ-перевод крепежа, группировка 4+4, момент и ключ, слияние ревизий с сохранением ручных правок |
-| Демо и UI | `apps/studio-web/src/**/*.test.ts(x)` (128) | все три проекта проходят схему, пины переводятся, reducer (scan/vision/2D↔3D), QR, печать, smoke-проход по экранам, офлайновый IKEA-рендер, клиенты обоих сервисов, офлайн-разбор GLB, «Настройки и подключение» (адреса, проверка связи, строгий режим), сканер QR с вставленной ссылкой, офлайн-библиотека |
+| Демо и UI | `apps/studio-web/src/**/*.test.ts(x)` (129) | все три проекта проходят схему, пины переводятся, reducer (scan/vision/2D↔3D), QR, печать, smoke-проход по экранам, офлайновый IKEA-рендер, клиенты обоих сервисов, офлайн-разбор GLB, «Настройки и подключение» (адреса, проверка связи, строгий режим), сканер QR с вставленной ссылкой, офлайн-библиотека |
 | Нативные оболочки | `scripts/check-native-configs.mjs` (127) | `tauri.conf.json` (productName, identifier, окно 1360×860/min 960×640, путь `frontendDist`), `Cargo.toml`, `lib.rs`/`main.rs`, capabilities dialog+fs, `capacitor.config.ts`, полный `android/`-проект, `AndroidManifest` (CAMERA/INTERNET/READ_MEDIA_IMAGES), `network_security_config.xml`, размеры всех `mipmap-*` PNG, оба workflow, CRLF у `.bat` |
 | Сервис распознавания | `services/vision-api/tests` (98 pytest) | синтетические листы и векторный PDF, перспектива, качество, нормализация, штамп, `/v1/recognize`, ROI, ошибки 4xx |
 | Сервис 3D-моделей | `services/cad-api/tests` (44 pytest) | синтетические STL/OBJ/GLB/STEP, нормализация единиц, роли и группировка крепежа, порядок без пересечений, SVG (валидный XML, 3 цвета, пунктирная ось, класс `attention`), `/health`, `/v1/cad/import`, `/v1/cad/render-view`, ошибки 415/413/422/404 |

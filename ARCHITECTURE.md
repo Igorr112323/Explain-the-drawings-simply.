@@ -417,7 +417,7 @@ YAML-парсер, CRLF у `.bat`). Компиляцию выполняют ра
 
 | Гейт | Команда | Текущий результат |
 | --- | --- | --- |
-| Unit-тесты | `npm test` | 241 тест, 23 файла, зелёные |
+| Unit-тесты | `npm test` | 242 теста, 23 файла, зелёные |
 | Сервис распознавания | `npm run test:vision` | 98 pytest, зелёные |
 | Сервис 3D-моделей | `npm run test:cad` | 44 pytest, зелёные |
 | Типы | `npm run typecheck` | 0 ошибок, strict |
@@ -523,7 +523,7 @@ YAML-парсер, CRLF у `.bat`). Компиляцию выполняют ра
 - [x] `.github/workflows/ci.yml`: типы, тесты, сборка, оба pytest, проверка конфигов
 - [x] `.github/workflows/release-builds.yml`: `.exe` (windows-latest + Rust), `.apk` (ubuntu + Java 17 + SDK),
       архив цехового сервера, Release по тегу `v*`, опциональная подпись из секретов
-- [x] Тесты этапа 4: `runtimeConfig` (19), `offlineStore` (9), `qrBridge` (15, включая настоящий round trip «модули → jsQR → документ»), UI-сценарии (4) — всего 241 тест / 23 файла
+- [x] Тесты этапа 4: `runtimeConfig` (19), `offlineStore` (9), `qrBridge` (15, включая настоящий round trip «модули → jsQR → документ»), UI-сценарии (4) — всего 242 теста / 23 файла
 - [x] `npm run check:native` — 127 статических проверок нативной упаковки, 0 провалов
 - [x] `cargo check` вынесен в CI (джоба `rust-tauri-check`): Rust компилируется на каждом push, хотя локально `rustc` нет
 - [x] README: как скачать `.exe`/`.apk` через Actions/Release и как поднять цеховой сервер на Windows

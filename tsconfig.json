@@ -28,6 +28,7 @@
     "apps/studio-web/src/**/*.ts",
     "apps/studio-web/src/**/*.tsx",
     "apps/studio-web/vite.config.ts",
+    "apps/mobile-capacitor/capacitor.config.ts",
     "vitest.config.ts"
   ]
 }
