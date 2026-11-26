@@ -53,7 +53,7 @@ fn spawn_local_engines() {
 #[cfg(windows)]
 fn spawn_quietly(path: &Path) {
     use std::os::windows::process::CommandExt;
-    /// `CREATE_NO_WINDOW` — процесс без консольного окна.
+    // `CREATE_NO_WINDOW` — процесс без консольного окна.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let _ = std::process::Command::new(path)
         .creation_flags(CREATE_NO_WINDOW)
