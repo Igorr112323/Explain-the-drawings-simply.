@@ -130,7 +130,7 @@ export function PagePreview({
   onTarget?: (target: PlanTarget) => void;
 }) {
   return (
-    <figure className="page-figure" aria-label={`Страница ${page.index + 1} из ${total}`}>
+    <figure className="page-figure" aria-label={`Страница ${page.index} из ${total}`}>
       <div
         className="page-frame"
         style={{ width: `${PAGE.width * PX_PER_MM * scale}px`, height: `${PAGE.height * PX_PER_MM * scale}px` }}
@@ -141,8 +141,9 @@ export function PagePreview({
           ))}
         </div>
       </div>
+      {/* `PlanPage.index` уже нумеруется с единицы — прибавлять ничего не нужно. */}
       <figcaption className="page-caption">
-        Стр. {page.index + 1} из {total}
+        Стр. {page.index} из {total}
       </figcaption>
     </figure>
   );

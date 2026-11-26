@@ -1,21 +1,41 @@
 /**
  * Документ на холсте: белые листы A4 «на столе», парящая пилюля нечёткого размера и уведомления.
  *
- * Никаких панелей вокруг: листы — это и есть интерфейс. Колесо мыши прокручивает стол, ⌘/Ctrl +
- * колесо — плавно масштабирует листы (двойной клик возвращает 100 %), клик по тексту листа
- * открывает правку ровно этого поля.
+ * Никаких панелей вокруг: листы — это и есть интерфейс. Масштаб и сдвиг стола:
+ *   • колесо мыши и пинч трекпада (`Ctrl + колесо`) — плавный зум 40…250 % вокруг курсора;
+ *   • перетаскивание фона (при масштабе > 100 %), правая/средняя кнопка или `Пробел` + тяга — сдвиг;
+ *   • `Ctrl/Cmd +`, `Ctrl/Cmd −`, `Ctrl/Cmd 0` — шаг и сброс к 100 %;
+ *   • мини-пилюля `− 100 % +` в правом нижнем углу: процент возвращает масштаб и центрирует листы.
+ *
+ * Колёсико и клавиши не перехватываются, когда фокус в поле ввода или в поповере: правка текста и
+ * прокрутка длинных списков продолжают работать как обычно.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PlanTarget } from '@ikguide/pdf-exporter';
 import type { PipelineApi } from '../state/pipeline';
 import { buildPlan } from '../lib/pdfExport';
+import {
+  FIT_ZOOM,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  RESET_ZOOM,
+  clampZoom,
+  scrollAfterZoom,
+  zoomHint,
+  zoomIn,
+  zoomLabel,
+  zoomOut,
+} from '../lib/zoom';
 import { PagePreview } from './PagePreview';
 
-const DEFAULT_ZOOM = 0.72;
-const MIN_ZOOM = 0.42;
-const MAX_ZOOM = 1.25;
+/** Внутри этих элементов колесо и клавиши принадлежат им, а не холсту. */
+const TYPING_SELECTOR = 'input, textarea, select, [contenteditable="true"]';
+/** По этим элементам клик — действие, а не начало перетаскивания стола. */
+const INTERACTIVE_SELECTOR = 'button, a, input, textarea, select, label, [role="button"]';
 
-const clampZoom = (value: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+function isTyping(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(TYPING_SELECTOR) !== null;
+}
 
 /** Одна маленькая пилюля: нечёткий размер подтверждается одним кликом. */
 function AmbiguousPill({ api, onOpenXray }: { api: PipelineApi; onOpenXray: () => void }) {
@@ -51,29 +71,234 @@ function AmbiguousPill({ api, onOpenXray }: { api: PipelineApi; onOpenXray: () =
   );
 }
 
-export function ReviewStage({ api, onTarget, onOpenXray }: { api: PipelineApi; onTarget: (target: PlanTarget) => void; onOpenXray: () => void }) {
-  const plan = useMemo(() => buildPlan(api.doc!, api.illustrations), [api.doc, api.illustrations]);
-  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
-  const desk = useRef<HTMLDivElement>(null);
+/** Пилюля масштаба: `− 100 % +`, без панелей и подписей. */
+function ZoomPill({
+  zoom,
+  onZoomIn,
+  onZoomOut,
+  onReset,
+}: {
+  zoom: number;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onReset: () => void;
+}) {
+  return (
+    <div className="zoom-pill" role="group" aria-label="Масштаб листов" title={zoomHint()}>
+      <button
+        type="button"
+        className="zoom-btn"
+        onClick={onZoomOut}
+        disabled={zoom <= MIN_ZOOM}
+        aria-label="Уменьшить масштаб"
+      >
+        −
+      </button>
+      <button
+        type="button"
+        className="zoom-value"
+        onClick={onReset}
+        aria-label={`Сбросить масштаб до 100 процентов (сейчас ${zoomLabel(zoom)})`}
+        title="Сбросить к 100 % и центрировать листы"
+      >
+        {zoomLabel(zoom)}
+      </button>
+      <button
+        type="button"
+        className="zoom-btn"
+        onClick={onZoomIn}
+        disabled={zoom >= MAX_ZOOM}
+        aria-label="Увеличить масштаб"
+      >
+        +
+      </button>
+    </div>
+  );
+}
 
-  const onWheel = useCallback((event: WheelEvent) => {
-    if (!event.ctrlKey && !event.metaKey) {
+export function ReviewStage({
+  api,
+  onTarget,
+  onOpenXray,
+}: {
+  api: PipelineApi;
+  onTarget: (target: PlanTarget) => void;
+  onOpenXray: () => void;
+}) {
+  const plan = useMemo(() => buildPlan(api.doc!, api.illustrations), [api.doc, api.illustrations]);
+  const [zoom, setZoom] = useState(FIT_ZOOM);
+  const [panning, setPanning] = useState(false);
+  const desk = useRef<HTMLDivElement>(null);
+  const zoomRef = useRef(zoom);
+  const spaceRef = useRef(false);
+  const panRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const pinchRef = useRef<{ distance: number; zoom: number } | null>(null);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
+
+  /** Меняет масштаб, удерживая точку под курсором на месте. */
+  const zoomAround = useCallback((next: number, clientX?: number, clientY?: number) => {
+    const deskNode = desk.current;
+    const previous = zoomRef.current;
+    const target = clampZoom(next);
+    if (Math.abs(target - previous) < 1e-4) {
       return;
     }
-    event.preventDefault();
-    setZoom((value) => clampZoom(value - event.deltaY * 0.0022));
+    if (deskNode) {
+      const rect = deskNode.getBoundingClientRect();
+      const px = clientX === undefined ? rect.width / 2 : clientX - rect.left;
+      const py = clientY === undefined ? rect.height / 2 : clientY - rect.top;
+      const left = scrollAfterZoom(deskNode.scrollLeft, px, previous, target);
+      const top = scrollAfterZoom(deskNode.scrollTop, py, previous, target);
+      zoomRef.current = target;
+      setZoom(target);
+      // Прокрутка возможна только после перерисовки листов в новом размере.
+      requestAnimationFrame(() => {
+        deskNode.scrollLeft = left;
+        deskNode.scrollTop = top;
+      });
+      return;
+    }
+    zoomRef.current = target;
+    setZoom(target);
   }, []);
 
+  const resetZoom = useCallback(() => {
+    zoomAround(RESET_ZOOM);
+    const deskNode = desk.current;
+    if (deskNode) {
+      requestAnimationFrame(() => {
+        deskNode.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
+      });
+    }
+  }, [zoomAround]);
+
+  /* Колесо: обычное и пинч трекпада (Ctrl+колесо). Пассивный слушатель не годится — нужен preventDefault. */
   useEffect(() => {
     const node = desk.current;
     if (!node) {
       return;
     }
-    node.addEventListener('wheel', onWheel, { passive: false });
-    return () => {
-      node.removeEventListener('wheel', onWheel);
+    const onWheel = (event: WheelEvent) => {
+      if (isTyping(event.target)) {
+        return;
+      }
+      event.preventDefault();
+      const pinch = event.ctrlKey || event.metaKey;
+      const factor = Math.exp(-event.deltaY * (pinch ? 0.01 : 0.0016));
+      const bounded = Math.min(1.35, Math.max(1 / 1.35, factor));
+      zoomAround(zoomRef.current * bounded, event.clientX, event.clientY);
     };
-  }, [onWheel]);
+    node.addEventListener('wheel', onWheel, { passive: false });
+    return () => node.removeEventListener('wheel', onWheel);
+  }, [zoomAround]);
+
+  /* Клавиатура: Ctrl/Cmd +, −, 0; пробел включает режим сдвига. */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isTyping(event.target)) {
+        return;
+      }
+      const modifier = event.ctrlKey || event.metaKey;
+      if (modifier) {
+        if (event.key === '+' || event.key === '=' || event.code === 'NumpadAdd') {
+          event.preventDefault();
+          zoomAround(zoomIn(zoomRef.current));
+        } else if (event.key === '-' || event.key === '_' || event.code === 'NumpadSubtract') {
+          event.preventDefault();
+          zoomAround(zoomOut(zoomRef.current));
+        } else if (event.key === '0' || event.code === 'Numpad0') {
+          event.preventDefault();
+          resetZoom();
+        }
+        return;
+      }
+      if (event.code === 'Space' && !event.repeat) {
+        spaceRef.current = true;
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') {
+        spaceRef.current = false;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, [resetZoom, zoomAround]);
+
+  const canStartPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button === 1 || event.button === 2 || spaceRef.current) {
+      return true;
+    }
+    if (event.button !== 0) {
+      return false;
+    }
+    // Левая кнопка по фону — только когда листы крупнее 100 %: иначе это просто клик/скролл.
+    const target = event.target as Element | null;
+    return zoomRef.current > RESET_ZOOM && !target?.closest(INTERACTIVE_SELECTOR);
+  };
+
+  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!canStartPan(event)) {
+      return;
+    }
+    const node = desk.current;
+    if (!node) {
+      return;
+    }
+    event.preventDefault();
+    node.setPointerCapture?.(event.pointerId);
+    panRef.current = { x: event.clientX, y: event.clientY, left: node.scrollLeft, top: node.scrollTop };
+    setPanning(true);
+  };
+
+  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const node = desk.current;
+    const start = panRef.current;
+    if (!node || !start) {
+      return;
+    }
+    node.scrollLeft = start.left - (event.clientX - start.x);
+    node.scrollTop = start.top - (event.clientY - start.y);
+  };
+
+  const endPan = () => {
+    panRef.current = null;
+    setPanning(false);
+  };
+
+  /* Двухпальцевый пинч на сенсорных экранах: тот же диапазон 40…250 %. */
+  const onTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 2) {
+      return;
+    }
+    const [a, b] = [event.touches[0]!, event.touches[1]!];
+    pinchRef.current = { distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), zoom: zoomRef.current };
+  };
+
+  const onTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const start = pinchRef.current;
+    if (!start || event.touches.length !== 2) {
+      return;
+    }
+    const [a, b] = [event.touches[0]!, event.touches[1]!];
+    const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    if (distance <= 0 || start.distance <= 0) {
+      return;
+    }
+    const center = { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
+    zoomAround((start.zoom * distance) / start.distance, center.x, center.y);
+  };
+
+  const onTouchEnd = () => {
+    pinchRef.current = null;
+  };
 
   return (
     <>
@@ -106,10 +331,34 @@ export function ReviewStage({ api, onTarget, onOpenXray }: { api: PipelineApi; o
         )}
       </div>
 
-      <div className="sheets" ref={desk} onDoubleClick={() => setZoom(DEFAULT_ZOOM)}>
+      <div
+        className="sheets"
+        ref={desk}
+        data-panning={panning ? 'true' : 'false'}
+        data-zoomable={zoom > RESET_ZOOM ? 'true' : 'false'}
+        onDoubleClick={(event) => {
+          if (isTyping(event.target)) {
+            return;
+          }
+          resetZoom();
+        }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endPan}
+        onPointerCancel={endPan}
+        onPointerLeave={endPan}
+        onContextMenu={(event) => event.preventDefault()}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+      >
         {plan.pages.map((page) => (
           <PagePreview key={page.index} page={page} total={plan.pages.length} scale={zoom} onTarget={onTarget} />
         ))}
+      </div>
+
+      <div className="zoom-slot">
+        <ZoomPill zoom={zoom} onZoomIn={() => zoomAround(zoomIn(zoomRef.current))} onZoomOut={() => zoomAround(zoomOut(zoomRef.current))} onReset={resetZoom} />
       </div>
     </>
   );

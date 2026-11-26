@@ -229,6 +229,79 @@ describe('холст с парящими капсулами', () => {
     expect(window.localStorage.getItem('ikguide:theme')).toBe('dark');
   });
 
+  it('подписи под листами идут строго по порядку: «Стр. 1 из N» … «Стр. N из N»', async () => {
+    await openDemo();
+    const captions = all('.page-caption').map((node) => (node.textContent ?? '').trim());
+    expect(captions.length).toBeGreaterThan(2);
+    const total = captions.length;
+    expect(captions).toEqual(Array.from({ length: total }, (_, index) => `Стр. ${index + 1} из ${total}`));
+    // Ни одной подписи за пределами «N из N» — именно этот сдвиг был багом.
+    expect(captions.some((caption) => caption.includes(`Стр. ${total + 1} из`))).toBe(false);
+    expect(all('.page-figure').every((node) => (node.getAttribute('aria-label') ?? '').includes(`из ${total}`))).toBe(true);
+  }, 30_000);
+
+  it('пилюля масштаба: проценты, «+», «−» и сброс к 100 %', async () => {
+    await openDemo();
+    const pill = container.querySelector('.zoom-pill');
+    expect(pill, 'пилюля масштаба').not.toBeNull();
+    expect(pill!.textContent).toContain('72%');
+
+    await click(byLabel('Увеличить масштаб'));
+    expect(container.querySelector('.zoom-pill')!.textContent).toContain('75%');
+    expect(container.querySelector('.sheets')!.getAttribute('data-zoomable')).toBe('false');
+
+    await click(byLabel('Увеличить масштаб'));
+    await click(byLabel('Увеличить масштаб'));
+    expect(container.querySelector('.zoom-pill')!.textContent).toContain('125%');
+    // Крупнее 100 % — фон холста можно тянуть.
+    expect(container.querySelector('.sheets')!.getAttribute('data-zoomable')).toBe('true');
+
+    await click(byLabel('Уменьшить масштаб'));
+    expect(container.querySelector('.zoom-pill')!.textContent).toContain('100%');
+
+    // Клик по процентам возвращает ровно 100 % и центрирует листы.
+    await click(
+      Array.from(container.querySelectorAll('.zoom-value')).find((node) => node.textContent?.includes('%')) as Element,
+    );
+    expect(container.querySelector('.zoom-pill')!.textContent).toContain('100%');
+  }, 30_000);
+
+  it('колесо мыши и Ctrl+«+» меняют масштаб, а поле правки колесо не перехватывает', async () => {
+    await openDemo();
+    const sheets = container.querySelector('.sheets')!;
+    expect(container.querySelector('.zoom-pill')!.textContent).toContain('72%');
+
+    await act(async () => {
+      sheets.dispatchEvent(new WheelEvent('wheel', { deltaY: -240, bubbles: true, cancelable: true }));
+    });
+    await flush();
+    expect(container.querySelector('.zoom-pill')!.textContent).not.toContain('72%');
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: '0', ctrlKey: true, bubbles: true }));
+    });
+    await flush();
+    expect(container.querySelector('.zoom-pill')!.textContent).toContain('100%');
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: '-', ctrlKey: true, bubbles: true }));
+    });
+    await flush();
+    expect(container.querySelector('.zoom-pill')!.textContent).toContain('75%');
+
+    // Правка текста: колесо в поле ввода не должно менять масштаб листов.
+    await click(byLabel('Править текст и название'));
+    const field = container.querySelector('.inline-edit, .inline-input');
+    const before = container.querySelector('.zoom-pill')!.textContent;
+    if (field) {
+      await act(async () => {
+        field.dispatchEvent(new WheelEvent('wheel', { deltaY: -240, bubbles: true, cancelable: true }));
+      });
+      await flush();
+      expect(container.querySelector('.zoom-pill')!.textContent).toBe(before);
+    }
+  }, 30_000);
+
   it('пример открывается из поповера и ложится листами A4 прямо на холст', async () => {
     await openDemo();
 
