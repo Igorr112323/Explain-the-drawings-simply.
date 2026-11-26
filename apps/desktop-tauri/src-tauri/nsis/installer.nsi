@@ -54,6 +54,9 @@ ManifestDPIAware true
 !define MUI_BGCOLOR "FFFFFF"
 !define MUI_TEXTCOLOR "1C1C1E"
 !define MUI_HEADER_TRANSPARENT_TEXT
+; MUI2 сам создаёт .onGUIInit: свой код вешаем через его же хук, иначе makensis ругается
+; «Function named .onGUIInit already exists» на MUI_LANGUAGE.
+!define MUI_CUSTOMFUNCTION_GUIINIT IkGuideFlatInit
 !define MUI_ABORTWARNING
 
 ; Заголовки на русском, без технического мусора: одно предложение на страницу.
@@ -517,8 +520,9 @@ Function FlatFinish
   SetCtlColors $mui.FinishPage.Text ${MUI_TEXTCOLOR} ${MUI_BGCOLOR}
 FunctionEnd
 
-Function .onGUIInit
+Function IkGuideFlatInit
   ; Окно мастера — белое с самого начала, до показа первой страницы.
+  ; Вызывается MUI2 из своего .onGUIInit (см. MUI_CUSTOMFUNCTION_GUIINIT выше).
   Call FlatWindow
 FunctionEnd
 

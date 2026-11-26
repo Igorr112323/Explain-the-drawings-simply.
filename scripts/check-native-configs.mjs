@@ -190,6 +190,7 @@ if (templateExists) {
   check('  сохранены ярлыки и удаление', nsi.includes('CreateOrUpdateStartMenuShortcut') && /Section Uninstall/.test(nsi));
   check('  сохранена проверка запущенного приложения', nsi.includes('CheckIfAppIsRunning'));
   // bundler компилирует .nsi как Handlebars: любой комментарий с {{...}} ломает сборку установщика.
+  check('  свой код инициализации идёт через хук MUI, а не через .onGUIInit', nsi.includes('!define MUI_CUSTOMFUNCTION_GUIINIT') && !/^Function \.onGUIInit/m.test(nsi));
   check(
     '  все {{...}} — валидные плейсхолдеры Handlebars',
     !/\{\{(?!\s*[#/!^@A-Za-z_])/.test(nsi) && (nsi.match(/\{\{/g) ?? []).length === (nsi.match(/\}\}/g) ?? []).length,
