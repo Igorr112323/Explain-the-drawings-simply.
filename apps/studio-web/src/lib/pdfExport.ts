@@ -1,17 +1,17 @@
 /**
  * «Скачать PDF-инструкцию» — вся цепочка от документа до файла на диске.
  *
- * Вёрстка живёт в `@ikguide/pdf-exporter` (общая с тестами и предпросмотром), рендер — jsPDF +
- * svg2pdf с вшитым кириллическим шрифтом, поэтому в браузере нет ни сервера, ни диалога печати.
+ * Вёрстка (`@ikguide/pdf-exporter/plan`) нужна сразу: из неё рисуется живой предпросмотр. А сам
+ * рендер (jsPDF + svg2pdf, ~0,5 МБ) подгружается только в момент нажатия кнопки — поэтому экран
+ * загрузки открывается мгновенно даже на слабом ноутбуке.
  */
 import type { IkGuideDocument } from '@ikguide/schema';
 import {
   buildInstructionPlan,
   instructionFileName,
-  renderInstructionPdf,
   type IllustrationInput,
   type InstructionPlan,
-} from '@ikguide/pdf-exporter';
+} from '@ikguide/pdf-exporter/plan';
 import { savePdfFile, type SaveFileResult } from './nativeExport';
 
 export interface PdfJob {
@@ -37,6 +37,7 @@ export function fileNameFor(doc: IkGuideDocument): string {
 /** Рендерит настоящий бинарный PDF в памяти — файл появится только после явного сохранения. */
 export async function renderPdf(doc: IkGuideDocument, illustrations: PdfIllustrations): Promise<PdfJob> {
   const plan = buildPlan(doc, illustrations);
+  const { renderInstructionPdf } = await import('@ikguide/pdf-exporter/render');
   const bytes = await renderInstructionPdf(plan);
   return { plan, bytes, fileName: fileNameFor(doc) };
 }

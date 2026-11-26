@@ -10,9 +10,24 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./plan": {
+      "types": "./src/plan.ts",
+      "default": "./src/plan.ts"
+    },
+    "./text": {
+      "types": "./src/text.ts",
+      "default": "./src/text.ts"
+    },
+    "./render": {
+      "types": "./src/render.ts",
+      "default": "./src/render.ts"
     }
   },
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
