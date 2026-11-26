@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GuideStep, XrayAnnotation } from '@ikguide/schema';
 import { translateEngineeringNotation } from '@ikguide/gost-translator';
 import type { PipelineApi } from '../state/pipeline';
@@ -6,6 +6,7 @@ import { buildPlan } from '../lib/pdfExport';
 import { saveLabel } from '../lib/nativeExport';
 import { InlineEdit } from './InlineEdit';
 import { PagePreview } from './PagePreview';
+import { SheetCard } from './SheetCard';
 
 const shortTitle = (title: string) => (title.length > 28 ? `${title.slice(0, 27)}…` : title);
 
@@ -50,13 +51,25 @@ function SizeBanner({ api }: { api: PipelineApi }) {
 /** Расшифровки ГОСТ: автоперевод можно переписать, правка уйдёт в PDF. */
 function NotationPanel({
   annotations,
+  selectedId,
   onNote,
   onConfirm,
 }: {
   annotations: readonly XrayAnnotation[];
+  selectedId: string | null;
   onNote: (id: string, note: string) => void;
   onConfirm: (id: string, value: string) => void;
 }) {
+  const listRef = useRef<HTMLUListElement>(null);
+
+  useEffect(() => {
+    if (!selectedId || !listRef.current) {
+      return;
+    }
+    const target = listRef.current.querySelector(`[data-annotation="${selectedId}"]`);
+    target?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, [selectedId]);
+
   if (annotations.length === 0) {
     return (
       <section className="card">
@@ -69,9 +82,13 @@ function NotationPanel({
     <section className="card">
       <h3>Обозначения и допуски</h3>
       <p className="card-note">Автоперевод ГОСТ можно переписать — он попадёт в шпаргалку PDF.</p>
-      <ul className="notation-list">
+      <ul className="notation-list" ref={listRef}>
         {annotations.map((annotation) => (
-          <li key={annotation.id} className="notation">
+          <li
+            key={annotation.id}
+            data-annotation={annotation.id}
+            className={`notation ${selectedId === annotation.id ? 'notation-active' : ''}`}
+          >
             <div className="notation-head">
               <code className="notation-raw">{annotation.resolvedValue ?? annotation.raw}</code>
               {!annotation.confirmedByHuman && (
@@ -262,6 +279,7 @@ function ChecklistPanel({ api }: { api: PipelineApi }) {
 export function ReviewScreen({ api }: { api: PipelineApi }) {
   const doc = api.doc!;
   const plan = useMemo(() => buildPlan(doc, api.illustrations), [doc, api.illustrations]);
+  const [selectedAnnotation, setSelectedAnnotation] = useState<string | null>(null);
   const stepCount = doc.steps.length;
   const antiErrors = doc.steps.filter((step) => step.antiError).length;
 
@@ -365,8 +383,15 @@ export function ReviewScreen({ api }: { api: PipelineApi }) {
 
         <aside className="inspector" aria-label="Правки">
           <StepPanel api={api} />
+          <SheetCard
+            pages={api.pages}
+            annotations={doc.xrayAnnotations}
+            selectedId={selectedAnnotation}
+            onPick={setSelectedAnnotation}
+          />
           <NotationPanel
             annotations={doc.xrayAnnotations}
+            selectedId={selectedAnnotation}
             onNote={api.actions.editAnnotationNote}
             onConfirm={api.actions.resolveSize}
           />

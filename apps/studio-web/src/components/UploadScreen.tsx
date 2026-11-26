@@ -80,6 +80,8 @@ export function UploadScreen({
           type="file"
           multiple
           accept={ACCEPT_ATTRIBUTE}
+          // Клик по самому полю не должен всплывать до зоны: иначе она откроет его заново.
+          onClick={(event) => event.stopPropagation()}
           onChange={(event) => {
             pick(event.target.files);
             event.target.value = '';

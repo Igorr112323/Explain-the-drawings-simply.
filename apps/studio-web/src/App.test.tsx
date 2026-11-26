@@ -173,6 +173,13 @@ describe('однозадачный конвейер в браузере', () => 
     expect(container.querySelector('.dropzone')).not.toBeNull();
   });
 
+  it('клик по зоне открывает диалог один раз (без рекурсии)', async () => {
+    const spy = vi.spyOn(HTMLInputElement.prototype, 'click');
+    await render();
+    await click(container.querySelector('.dropzone') as Element);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it('демо открывается без сети и показывает предпросмотр листов A4', async () => {
     await render();
     await clickText('Кронштейн КС-04');
@@ -197,6 +204,12 @@ describe('однозадачный конвейер в браузере', () => 
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/v1/recognize');
     expect(text()).toContain('Скачать PDF-инструкцию');
+
+    // Лист чертежа с пинами: картинка из ответа /v1/recognize и по точке на каждое обозначение.
+    const pins = container.querySelectorAll('.sheet-pin');
+    expect(pins).toHaveLength(VISION_RESPONSE.candidates.length);
+    await click(pins[0] ?? undefined);
+    expect(container.querySelectorAll('.notation-active')).toHaveLength(1);
 
     // 64 % — жёлтая плашка с вариантами «12» / «18».
     expect(text()).toContain('Проверьте размеры');

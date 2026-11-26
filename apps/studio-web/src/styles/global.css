@@ -992,6 +992,76 @@ button {
   accent-color: var(--accent);
 }
 
+/* лист чертежа с пинами */
+
+.sheet {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.sheet-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.sheet-pin {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  background: var(--accent);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transition: transform 0.14s ease;
+}
+
+.sheet-pin:hover,
+.sheet-pin:focus-visible {
+  transform: translate(-50%, -50%) scale(1.35);
+  outline: none;
+}
+
+.sheet-pin-active {
+  transform: translate(-50%, -50%) scale(1.4);
+  background: var(--danger);
+  z-index: 2;
+}
+
+.sheet-pin-done {
+  background: var(--ok);
+}
+
+.sheet-pin-label {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 1px 5px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.3;
+  white-space: nowrap;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  border-radius: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.14s ease;
+}
+
+.sheet-pin:hover .sheet-pin-label,
+.sheet-pin:focus-visible .sheet-pin-label,
+.sheet-pin-active .sheet-pin-label {
+  opacity: 1;
+}
+
 /* обозначения */
 
 .notation-list {
@@ -1006,7 +1076,14 @@ button {
 .notation {
   padding: 10px 12px;
   background: var(--chip);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.notation-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 .notation-head {
