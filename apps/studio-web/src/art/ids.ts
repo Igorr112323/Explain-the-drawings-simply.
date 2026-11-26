@@ -12,7 +12,6 @@ export const ILLUSTRATION_IDS = [
   'gearbox-torque',
   'gearbox-check',
   'generic-step',
-  'cad-assembly',
 ] as const;
 
 export type IllustrationId = (typeof ILLUSTRATION_IDS)[number];

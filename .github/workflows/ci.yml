@@ -1,6 +1,6 @@
 name: CI
 
-# Every push and every pull request: TypeScript gates plus both Python services.
+# Every push and every pull request: TypeScript gates plus the Python recognition service.
 # Nothing here needs a native SDK, so it finishes in a couple of minutes.
 on:
   push:
@@ -45,7 +45,7 @@ jobs:
           retention-days: 7
 
   python-services:
-    name: Python · vision-api + cad-api tests
+    name: Python · vision-api tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,18 +62,8 @@ jobs:
           # OCR is optional: without it the service still reads vector PDFs and reports `ocr: none`.
           pip install -r services/vision-api/requirements-ocr.txt || echo "OCR недоступен — тесты не требуют его"
 
-      - name: Install cad-api dependencies
-        run: |
-          pip install -r services/cad-api/requirements.txt
-          # STEP is optional as well (cascadio); STL/OBJ/GLB cover the rest.
-          pip install -r services/cad-api/requirements-step.txt || echo "STEP-движок недоступен — тесты не требуют его"
-
       - name: pytest vision-api
         working-directory: services/vision-api
-        run: python -m pytest -q
-
-      - name: pytest cad-api
-        working-directory: services/cad-api
         run: python -m pytest -q
 
   # Настоящая проверка Rust-оболочки: в песочнице разработки нет rustc, поэтому компиляция

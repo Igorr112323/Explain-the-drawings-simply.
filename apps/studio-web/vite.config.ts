@@ -6,7 +6,6 @@ const monorepoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const appRoot = fileURLToPath(new URL('.', import.meta.url));
 
 const DEFAULT_VISION_API = 'http://127.0.0.1:8000';
-const DEFAULT_CAD_API = 'http://127.0.0.1:8001';
 const aliases = {
   '@ikguide/schema': `${monorepoRoot}packages/ikguide-schema/src/index.ts`,
   '@ikguide/gost-translator': `${monorepoRoot}packages/gost-translator/src/index.ts`,
@@ -14,17 +13,13 @@ const aliases = {
 };
 
 /**
- * The browser only ever calls relative `/v1/...` and `/health`. The hosts of the two Python
- * services are a dev/preview concern and live in the proxy, configured through
- * VITE_VISION_API_URL (drawing recognition) and VITE_CAD_API_URL (CAD import + IKEA rendering).
- * `/v1/cad` is listed before the catch-all `/v1` so that CAD requests never reach vision-api.
+ * The browser only ever calls relative `/v1/...` and `/health`. The host of the local recognition
+ * service is a dev/preview concern and lives in the proxy, configured through VITE_VISION_API_URL.
  */
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, appRoot, '');
   const visionTarget = env.VITE_VISION_API_URL?.trim() || DEFAULT_VISION_API;
-  const cadTarget = env.VITE_CAD_API_URL?.trim() || DEFAULT_CAD_API;
   const proxy = {
-    '/v1/cad': { target: cadTarget, changeOrigin: true },
     '/v1': { target: visionTarget, changeOrigin: true },
     '/health': { target: visionTarget, changeOrigin: true },
   };

@@ -21,7 +21,7 @@ fn shell_version() -> String {
 static ENGINE_ONCE: Once = Once::new();
 
 /// Имена исполняемых файлов, которые может положить рядом установщик движка.
-const ENGINE_BINARIES: [&str; 2] = ["ikguide-vision.exe", "ikguide-cad.exe"];
+const ENGINE_BINARIES: [&str; 1] = ["ikguide-vision.exe"];
 
 /// Где искать движок. В установщике он лежит ресурсами (`$INSTDIR\engine`), в переносимой
 /// сборке — рядом с `.exe`; на всякий случай проверяем и `resources\engine`.

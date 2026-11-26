@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "IkGuide — чертёж или 3D-модель в понятную PDF-инструкцию в стиле IKEA.",
+  "description": "IkGuide — 2D-чертёж в понятную PDF-инструкцию в стиле IKEA.",
   "workspaces": [
     "packages/*",
     "apps/studio-web"
@@ -20,12 +20,9 @@
     "build": "npm run build:packages && npm run build -w @ikguide/studio-web",
     "build:packages": "npm run build -w @ikguide/schema -w @ikguide/gost-translator -w @ikguide/builder",
     "dev:vision": "bash services/vision-api/run.sh dev",
-    "dev:cad": "bash services/cad-api/run.sh dev",
     "dev:all": "bash scripts/dev-all.sh",
     "install:vision": "bash services/vision-api/run.sh install",
-    "install:cad": "bash services/cad-api/run.sh install",
     "test:vision": "bash services/vision-api/run.sh test",
-    "test:cad": "bash services/cad-api/run.sh test",
     "desktop:dev": "npm --prefix apps/desktop-tauri run dev",
     "desktop:build": "npm --prefix apps/desktop-tauri run build",
     "desktop:icons": "bash apps/desktop-tauri/scripts/make-icons.sh",

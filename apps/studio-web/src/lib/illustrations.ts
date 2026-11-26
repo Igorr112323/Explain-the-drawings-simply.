@@ -2,15 +2,14 @@
  * Из документа `IkGuideDocument` в готовые SVG-схемы для PDF и предпросмотра.
  *
  * Один и тот же SVG уходит и на экран, и в PDF: у pdf-exporter нет своей графики, поэтому
- * «что вижу — то и печатаю». Для 3D документ хранит камеру шага (`cameraView`), так что смена
- * ракурса в интерфейсе — это просто новая отрисовка той же сцены.
+ * «что вижу — то и печатаю». Если шаг пришёл из распознанного листа, приоритет у настоящего
+ * фрагмента чертежа (`fragments`), а векторная схема остаётся запасным вариантом.
  */
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { GuideStep, IkGuideDocument } from '@ikguide/schema';
 import type { IllustrationInput } from '@ikguide/pdf-exporter';
 import { artFor, DrawingSheet } from '../art/registry';
-import { renderIkeaSvg, sceneFromParts, type IkeaSceneGeometry } from './ikeaSvg';
 
 export interface Illustrations {
   cover: IllustrationInput | undefined;
@@ -21,23 +20,6 @@ export interface Illustrations {
 export interface FragmentInput {
   steps?: Readonly<Record<string, string>>;
   cover?: string | null;
-}
-
-const DEFAULT_AZIMUTH = 35;
-const DEFAULT_ELEVATION = 26;
-
-function sceneOf(doc: IkGuideDocument): IkeaSceneGeometry | null {
-  const assembly = doc.assembly3d;
-  if (!assembly) {
-    return null;
-  }
-  const centers: Record<string, [number, number, number]> = {};
-  for (const part of assembly.parts) {
-    if (part.centerMm) {
-      centers[part.id] = [part.centerMm.x, part.centerMm.y, part.centerMm.z];
-    }
-  }
-  return sceneFromParts(assembly.parts, centers);
 }
 
 /** Некоторые арт-компоненты оборачивают схему в `<div class="sheet">`: PDF-у нужен чистый `<svg>`. */
@@ -61,44 +43,12 @@ function artSvg(step: GuideStep): string {
   );
 }
 
-/** 3D-схема шага: активные детали синие, уже собранные — контуром, будущие — призраком. */
-export function step3dSvg(doc: IkGuideDocument, step: GuideStep, azimuth?: number, elevation?: number): string | null {
-  const scene = sceneOf(doc);
-  if (!scene) {
-    return null;
-  }
-  const camera = step.cameraView;
-  const active = step.activePartIds ?? [];
-  const installed = step.installedPartIds ?? [];
-  const hidden = scene.parts
-    .map((part) => part.id)
-    .filter((id) => !active.includes(id) && !installed.includes(id));
-  return renderIkeaSvg(scene, {
-    activePartIds: active,
-    installedPartIds: installed,
-    hiddenPartIds: hidden,
-    explode: active.length > 1 ? 0.55 : 0.4,
-    azimuth: azimuth ?? camera?.azimuth ?? DEFAULT_AZIMUTH,
-    elevation: elevation ?? camera?.elevation ?? DEFAULT_ELEVATION,
-  });
-}
-
-/** Общая схема изделия для титульного листа. */
+/** Общая схема изделия для титульного листа — та же, что на листе чертежа. */
 export function coverSvg(doc: IkGuideDocument): string | undefined {
-  const scene = sceneOf(doc);
-  if (scene) {
-    const assembly = doc.assembly3d!;
-    return renderIkeaSvg(scene, {
-      installedPartIds: assembly.parts.map((part) => part.id),
-      explode: 0.32,
-      azimuth: DEFAULT_AZIMUTH,
-      elevation: DEFAULT_ELEVATION,
-    });
+  if (!doc.drawing.viewId) {
+    return undefined;
   }
-  if (!doc.assembly3d && doc.drawing.viewId) {
-    return unwrapSvg(renderToStaticMarkup(createElement(DrawingSheet, { viewId: doc.drawing.viewId })));
-  }
-  return undefined;
+  return unwrapSvg(renderToStaticMarkup(createElement(DrawingSheet, { viewId: doc.drawing.viewId })));
 }
 
 export function buildIllustrations(doc: IkGuideDocument, fragments: FragmentInput = {}): Illustrations {
@@ -109,8 +59,7 @@ export function buildIllustrations(doc: IkGuideDocument, fragments: FragmentInpu
       steps[step.id] = { imageDataUrl: fragment, caption: captionOf(step) };
       continue;
     }
-    const svg = doc.assembly3d ? step3dSvg(doc, step) : (step.svgDiagram ?? artSvg(step));
-    steps[step.id] = { svg: svg ?? undefined, caption: captionOf(step) };
+    steps[step.id] = { svg: step.svgDiagram ?? artSvg(step), caption: captionOf(step) };
   }
 
   if (fragments.cover) {
@@ -120,8 +69,5 @@ export function buildIllustrations(doc: IkGuideDocument, fragments: FragmentInpu
     };
   }
   const cover = coverSvg(doc);
-  return {
-    cover: cover ? { svg: cover, caption: doc.assembly3d ? 'Общий вид узла в сборе' : 'Общий вид по чертежу' } : undefined,
-    steps,
-  };
+  return { cover: cover ? { svg: cover, caption: 'Общий вид по чертежу' } : undefined, steps };
 }

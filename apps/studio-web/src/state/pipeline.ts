@@ -22,7 +22,6 @@ import {
   lowConfidenceNotes,
   setAntiError,
   setAnnotationNote,
-  setCamera,
   setChecklistText,
   setMeta,
   setStepText,
@@ -88,7 +87,6 @@ export interface PipelineActions {
   editStepText(stepId: string, text: string): void;
   editStepTitle(stepId: string, title: string): void;
   editAntiError(stepId: string, text: string | null): void;
-  editCamera(stepId: string, azimuth: number, elevation: number): void;
   resolveSize(annotationId: string, value: string): void;
   editAnnotationNote(annotationId: string, note: string): void;
   editChecklistText(itemId: string, text: string): void;
@@ -250,7 +248,6 @@ export function usePipeline(): PipelineApi {
       editStepText: (stepId, text) => mutate((doc) => setStepText(doc, stepId, text)),
       editStepTitle: (stepId, title) => mutate((doc) => setStepTitle(doc, stepId, title)),
       editAntiError: (stepId, text) => mutate((doc) => setAntiError(doc, stepId, text)),
-      editCamera: (stepId, azimuth, elevation) => mutate((doc) => setCamera(doc, stepId, azimuth, elevation)),
       resolveSize: (annotationId, value) => mutate((doc) => applyDimensionFix(doc, annotationId, value)),
       editAnnotationNote: (annotationId, note) => mutate((doc) => setAnnotationNote(doc, annotationId, note)),
       editChecklistText: (itemId, text) => mutate((doc) => setChecklistText(doc, itemId, text)),

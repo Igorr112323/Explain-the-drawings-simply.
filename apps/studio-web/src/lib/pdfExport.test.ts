@@ -114,7 +114,7 @@ describe('настоящий PDF-файл', () => {
   }, 60_000);
 
   it('вставляет схемы шагов векторами (синий акцент IKEA и контуры)', async () => {
-    const project = DEMO_PROJECTS.find((item) => item.id === 'demo-up08-3d')!;
+    const project = DEMO_PROJECTS.find((item) => item.id === 'demo-bracket')!;
     const job = await renderPdf(project.document, buildIllustrations(project.document));
     const content = streams(job.bytes).filter((chunk) => chunk.includes(' Td')).join('\n');
     expect(content.length).toBeGreaterThan(5000);

@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  ACCEPT_ATTRIBUTE,
   ACCEPTED_EXTENSIONS,
-  classifyFile,
+  ACCEPTED_FORMATS_LABEL,
   importFiles,
+  isDrawingFile,
   openDemo,
   PipelineError,
   titleFromFileName,
@@ -115,13 +117,16 @@ const image = (name = 'bracket.png') =>
   new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], name, { type: 'image/png' });
 
 describe('конвейер «файл → документ»', () => {
-  it('знает поддерживаемые форматы', () => {
-    expect(classifyFile('Вал.PDF')).toBe('drawing');
-    expect(classifyFile('photo.webp')).toBe('drawing');
-    expect(classifyFile('assembly.STEP')).toBe('model');
-    expect(classifyFile('model.glb')).toBe('model');
-    expect(classifyFile('notes.docx')).toBeNull();
-    expect(ACCEPTED_EXTENSIONS).toContain('.stl');
+  it('принимает только 2D-форматы чертежей', () => {
+    for (const name of ['Вал.PDF', 'photo.webp', 'scan.jpg', 'scan.jpeg', 'sheet.png']) {
+      expect(isDrawingFile(name), name).toBe(true);
+    }
+    for (const name of ['assembly.STEP', 'model.glb', 'part.stl', 'notes.docx']) {
+      expect(isDrawingFile(name), name).toBe(false);
+    }
+    expect([...ACCEPTED_EXTENSIONS]).toEqual(['.jpg', '.jpeg', '.png', '.webp', '.pdf']);
+    expect(ACCEPT_ATTRIBUTE).toBe('.jpg,.jpeg,.png,.webp,.pdf');
+    expect(ACCEPTED_FORMATS_LABEL).toBe('JPG · JPEG · PNG · WEBP · PDF');
   });
 
   it('делает читаемое название из имени файла', () => {
@@ -145,103 +150,27 @@ describe('конвейер «файл → документ»', () => {
     expect(result.doc.xrayAnnotations.find((item) => item.raw === '12')?.confirmedByHuman).toBe(false);
   });
 
-  it('отправляет STEP в сервис 3D и получает узлы сборки', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({
-        schemaVersion: '1.0',
-        sessionId: 'cad-1',
-        assembly: {
-          name: 'Кронштейн',
-          filename: 'bracket.step',
-          sourceFormat: 'step',
-          sizeMm: [120, 80, 40],
-          massKg: 2.4,
-        },
-        parts: [
-          {
-            id: 'p1',
-            name: 'Плита',
-            nodeName: 'plate',
-            role: 'base',
-            bbox: { min: [0, 0, 0], max: [120, 80, 10], size: [120, 80, 10] },
-            volumeMm3: 96_000,
-            centroid: [60, 40, 5],
-            triangleCount: 120,
-            explosionVector: [0, 0, 1],
-            groupKey: 'base:Плита',
-          },
-          {
-            id: 'p2',
-            name: 'Болт М8',
-            nodeName: 'bolt',
-            role: 'fastener',
-            bbox: { min: [10, 10, 10], max: [18, 18, 40], size: [8, 8, 30] },
-            volumeMm3: 1_500,
-            centroid: [14, 14, 25],
-            triangleCount: 60,
-            explosionVector: [0, 0, 1],
-            groupKey: 'fastener:Болт М8',
-          },
-        ],
-        steps: [
-          {
-            number: 1,
-            kind: 'base',
-            title: 'Уложите плиту',
-            workerText: 'Положите плиту основанием вниз.',
-            partIds: ['p1'],
-            count: 1,
-            explosionVector: [0, 0, 1],
-            azimuth: 35,
-            elevation: 26,
-            svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>',
-          },
-          {
-            number: 2,
-            kind: 'fastener',
-            title: 'Вкрутите болт',
-            workerText: 'Вкрутите болт М8 в отверстие.',
-            partIds: ['p2'],
-            count: 1,
-            explosionVector: [0, 0, 1],
-            azimuth: 35,
-            elevation: 26,
-            svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>',
-          },
-        ],
-        glbUrl: 'https://example.invalid/model.glb',
-        warnings: [],
-        stats: { parts: 2, fasteners: 1, steps: 2, triangles: 180 },
-      }),
-    );
-
-    const step = new File([new Uint8Array([0x49, 0x53, 0x4f])], 'bracket.step');
-    const result = await importFiles([step]);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/v1/cad/import');
-    expect(result.source).toBe('cad');
-    expect(result.doc.assembly3d?.parts).toHaveLength(2);
-    expect(result.doc.steps).toHaveLength(2);
-  });
-
-  it('без бэкенда подсказывает запустить npm run dev:all', async () => {
+  it('без движка подсказывает запустить npm run dev:vision', async () => {
     fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
     await expect(importFiles([image()])).rejects.toBeInstanceOf(PipelineError);
     await expect(importFiles([image()])).rejects.toMatchObject({
-      hint: expect.stringContaining('npm run dev:all'),
+      hint: expect.stringContaining('npm run dev:vision'),
     });
   });
 
-  it('объясняет, что формат не поддерживается', async () => {
+  it('объясняет, что формат не поддерживается, и не зовёт движок', async () => {
     const docx = new File([new Uint8Array([1])], 'notes.docx');
     await expect(importFiles([docx])).rejects.toMatchObject({
       message: expect.stringContaining('.docx'),
-      hint: expect.stringContaining('STEP'),
+      hint: expect.stringContaining('2D-чертежи'),
     });
+    const step = new File([new Uint8Array([0x49, 0x53, 0x4f])], 'bracket.step');
+    await expect(importFiles([step])).rejects.toMatchObject({ message: expect.stringContaining('.step') });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('все три демо открываются без сети', async () => {
-    for (const id of ['demo-bracket', 'demo-gearbox', 'demo-up08-3d'] as const) {
+  it('оба 2D-демо открываются без сети', async () => {
+    for (const id of ['demo-bracket', 'demo-gearbox'] as const) {
       const result = await openDemo(id);
       expect(result.source).toBe('demo');
       expect(result.doc.steps.length).toBeGreaterThan(1);

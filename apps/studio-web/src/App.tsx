@@ -1,7 +1,7 @@
 /**
  * IkGuide Studio: белый холст с точечной сеткой и пятью парящими капсулами.
  *
- * Один сценарий без обучения: перетащили чертёж или 3D-модель → на холсте легли листы A4 будущего
+ * Один сценарий без обучения: перетащили 2D-чертёж или PDF → на холсте легли листы A4 будущего
  * PDF → нажали `↑` и сохранили файл. Всё остальное живёт в поповерах, которые вырастают из своей
  * капсулы и закрываются кликом мимо.
  */
@@ -101,12 +101,7 @@ export function App() {
         setPanel('note');
         break;
       case 'step-illustration':
-        if (api.doc?.assembly3d) {
-          setFocusStepId(target.stepId);
-          setPanel('note');
-        } else {
-          setPanel('xray');
-        }
+        setPanel('xray');
         break;
       case 'notation':
         setSelectedNotation(target.annotationId);
@@ -225,7 +220,7 @@ export function App() {
           >
             <IconXray />
           </PillButton>
-          <PillButton label="Загрузить чертёж или 3D-модель" onClick={() => void pickFile()}>
+          <PillButton label="Загрузить 2D-чертёж или PDF" onClick={() => void pickFile()}>
             <IconAttach />
           </PillButton>
         </Pill>
@@ -242,10 +237,10 @@ export function App() {
         )}
       </div>
 
-      {/* Нижний правый угол: пометка «Осторожно!» или ракурс 3D. */}
+      {/* Нижний правый угол: пометка «Осторожно!». */}
       <div className="slot slot-br">
         <RoundButton
-          label="Добавить пометку «Осторожно!» или ракурс 3D"
+          label="Добавить пометку «Осторожно!»"
           onClick={() => toggle('note')}
           active={panel === 'note'}
           disabled={!hasDoc}
@@ -282,7 +277,7 @@ export function App() {
         type="file"
         multiple
         accept={ACCEPT_ATTRIBUTE}
-        aria-label="Файл чертежа или 3D-модели"
+        aria-label="Файл 2D-чертежа или PDF"
         onChange={(event) => {
           openFiles(event.target.files);
           event.target.value = '';

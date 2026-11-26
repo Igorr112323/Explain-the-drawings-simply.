@@ -197,7 +197,7 @@ describe('холст с парящими капсулами', () => {
     await render();
 
     expect(container.querySelector('.canvas')).not.toBeNull();
-    expect(container.querySelector('.hint-title')?.textContent).toBe('Перетащите чертёж или 3D-модель сюда');
+    expect(container.querySelector('.hint-title')?.textContent).toBe('Перетащите 2D-чертёж или PDF сюда');
     expect(buttonsIn(container.querySelector('.hint')!).map((b) => b.textContent).join()).toContain('выберите пример');
 
     // 2 овальные капсулы + 3 круглые кнопки по углам = 5 парящих элементов.
@@ -220,10 +220,8 @@ describe('холст с парящими капсулами', () => {
     expect(dialog, 'поповер «Ещё»').not.toBeNull();
     expect(dialog!.textContent).toContain('Тема');
     expect(dialog!.textContent).toContain('Движок');
-    // Проверка /health ушла в оба сервиса и статус подписан словами.
-    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual(
-      expect.arrayContaining(['/health', '/v1/cad/health']),
-    );
+    // Проверка /health ушла в локальный движок распознавания и статус подписан словами.
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toContain('/health');
     expect(dialog!.textContent).toContain('на связи');
 
     await click(buttonsIn(dialog!).find((b) => (b.textContent ?? '').includes('Тёмная')));
@@ -344,21 +342,23 @@ describe('холст с парящими капсулами', () => {
     expect(text()).toContain('PDF готов');
   }, 60_000);
 
-  it('3D-модель: ракурс шага меняется в поповере пометки', async () => {
-    await openDemo('Узел привода УП-08');
-    await click(byLabel('Добавить пометку «Осторожно!» или ракурс 3D'));
+  it('пометка «Осторожно!» правится из поповера и уходит на лист', async () => {
+    await openDemo();
+    await click(byLabel('Добавить пометку «Осторожно!»'));
 
     const dialog = container.querySelector('[role="dialog"]')!;
-    expect(dialog.textContent).toContain('Ракурс 3D-схемы');
-    const slider = dialog.querySelector('input[aria-label="Поворот схемы"]') as HTMLInputElement;
-    expect(slider).not.toBeNull();
+    expect(dialog.textContent).toContain('Добавить «Осторожно!»');
 
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(slider, '90');
-      slider.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await flush();
-    expect(dialog.textContent).toContain('90°');
+    // Второй шаг демо уже несёт предупреждение — правим именно его.
+    await click(dialog.querySelectorAll('.chip-step')[1] as HTMLButtonElement);
+    const fresh = container.querySelector('[role="dialog"]')!;
+    const field = Array.from(fresh.querySelectorAll('[aria-label]')).find((node) =>
+      (node.getAttribute('aria-label') ?? '').startsWith('Предупреждение шага'),
+    )!;
+    expect(field.textContent?.trim().length).toBeGreaterThan(5);
+
+    await editInline(field, 'Не сверлить насквозь.');
+    expect(text()).toContain('Не сверлить насквозь.');
   }, 30_000);
 
   it('без бэкенда показывает подсказку про npm run dev:all и предлагает пример', async () => {

@@ -175,20 +175,6 @@ export function setAntiError(doc: IkGuideDocument, stepId: string, text: string 
   };
 }
 
-/** Ракурс 3D-схемы шага (azimuth/elevation в градусах). */
-export function setCamera(doc: IkGuideDocument, stepId: string, azimuth: number, elevation: number): IkGuideDocument {
-  const clampedElevation = Math.max(-89, Math.min(89, Math.round(elevation)));
-  const normalizedAzimuth = Math.max(-360, Math.min(360, Math.round(azimuth)));
-  return {
-    ...doc,
-    steps: mapSteps(doc, (step) =>
-      step.id === stepId
-        ? { ...step, cameraView: { azimuth: normalizedAzimuth, elevation: clampedElevation } }
-        : step,
-    ),
-  };
-}
-
 /** Необязательный пункт чек-листа: галочка «требуется / по желанию». */
 export function toggleChecklistRequired(doc: IkGuideDocument, itemId: string): IkGuideDocument {
   return {

@@ -1,2 +1,0 @@
-# Optional STEP/STP tessellator (OpenCascade compiled to WebAssembly — no OpenGL, no C++ build).
-cascadio>=0.1

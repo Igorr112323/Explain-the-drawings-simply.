@@ -148,10 +148,7 @@ check('capabilities: запись бинарного PDF', permissions.includes(
 check('capabilities: нативный проводник Windows', permissions.includes('dialog:allow-open'));
 check('capabilities: чтение выбранного чертежа', permissions.includes('fs:allow-read-file'));
 
-for (const [service, exe] of [
-  ['vision-api', 'ikguide-vision'],
-  ['cad-api', 'ikguide-cad'],
-]) {
+for (const [service, exe] of [['vision-api', 'ikguide-vision']]) {
   const entry = join(ROOT, 'services', service, 'engine_entry.py');
   check(`services/${service}/engine_entry.py для PyInstaller`, existsSync(entry));
   if (existsSync(entry)) {
@@ -248,7 +245,7 @@ check('npm run backend указывает на скрипт', String(rootPkg.scr
 if (existsSync(batPath)) {
   const bat = readFileSync(batPath, 'latin1');
   check('  .bat в формате CRLF (обязательно для cmd.exe)', bat.includes('\r\n'));
-  check('  .bat запускает оба uvicorn-сервиса', (bat.match(/uvicorn/g) ?? []).length >= 2);
+  check('  .bat запускает uvicorn-сервис распознавания', (bat.match(/uvicorn/g) ?? []).length >= 1 && !bat.includes('cad-api'));
   check('  .bat слушает только 127.0.0.1', bat.includes('127.0.0.1') && !bat.includes('--host 0.0.0.0'));
 }
 if (existsSync(shPath)) {

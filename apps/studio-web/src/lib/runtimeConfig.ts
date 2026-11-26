@@ -1,16 +1,15 @@
 /**
- * Где живут два Python-сервиса и в какой оболочке мы работаем.
+ * Где живёт локальный движок распознавания и в какой оболочке мы работаем.
  *
  * Браузер (`npm run dev`, preview, статический хостинг): запросы идут относительными путями
  * `/v1/...`, их перехватывает прокси Vite. Ничего настраивать не нужно.
  *
- * Windows `.exe` (Tauri): относительный `/v1/...` упёрся бы в сам бандл, поэтому адреса берутся из
- * локального бэкенда по умолчанию — 127.0.0.1:8000 / 127.0.0.1:8001.
+ * Windows `.exe` (Tauri): относительный `/v1/...` упёрся бы в сам бандл, поэтому адрес берётся из
+ * локального движка по умолчанию — 127.0.0.1:8000.
  */
 export type Runtime = 'web' | 'tauri-desktop';
 
 export const NATIVE_VISION_URL = 'http://127.0.0.1:8000';
-export const NATIVE_CAD_URL = 'http://127.0.0.1:8001';
 
 interface RuntimeScope {
   window?: unknown;
@@ -47,7 +46,6 @@ export function joinUrl(base: string, path: string): string {
 
 /** Ключи, под которыми меню «•••» запоминает адреса движка на этом компьютере. */
 export const VISION_URL_KEY = 'ikguide:vision-url';
-export const CAD_URL_KEY = 'ikguide:cad-url';
 
 function readStored(key: string): string {
   try {
@@ -84,12 +82,7 @@ export function getVisionBaseUrl(runtime: Runtime = detectRuntime(), override?: 
   return sanitizeBaseUrl(override) || storedBaseUrl(VISION_URL_KEY) || (runtime === 'web' ? '' : NATIVE_VISION_URL);
 }
 
-/** Адрес сервиса 3D: та же логика, другой порт. */
-export function getCadBaseUrl(runtime: Runtime = detectRuntime(), override?: string): string {
-  return sanitizeBaseUrl(override) || storedBaseUrl(CAD_URL_KEY) || (runtime === 'web' ? '' : NATIVE_CAD_URL);
-}
-
 /** Готовая подсказка для экрана ошибки: что именно запустить, чтобы всё заработало. */
 export function backendHint(): string {
-  return 'Запустите локальный бэкенд: npm run dev:all (или npm run dev:vision и npm run dev:cad по отдельности).';
+  return 'Запустите локальный движок распознавания: npm run dev:vision — или откройте пример, он работает без движка.';
 }

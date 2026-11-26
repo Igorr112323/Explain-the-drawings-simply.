@@ -11,13 +11,13 @@ export function HintStage({ onDemos, dragging }: { onDemos: () => void; dragging
   return (
     <div className="hint" data-dragging={dragging ? 'true' : 'false'}>
       <div className="hint-ring" aria-hidden="true" />
-      <p className="hint-title">Перетащите чертёж или 3D-модель сюда</p>
+      <p className="hint-title">Перетащите 2D-чертёж или PDF сюда</p>
       <p className="hint-sub">
         <button type="button" className="hint-link" onClick={onDemos} data-popover-trigger="">
           или выберите пример
         </button>
       </p>
-      <p className="hint-formats">JPG · PNG · WEBP · PDF · STEP · STP · STL · OBJ · GLB · GLTF</p>
+      <p className="hint-formats">JPG · JPEG · PNG · WEBP · PDF</p>
     </div>
   );
 }

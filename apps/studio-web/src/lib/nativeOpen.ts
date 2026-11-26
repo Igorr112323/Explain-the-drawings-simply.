@@ -1,5 +1,5 @@
 /**
- * «Загрузить чертёж или 3D-модель» в `.exe`: системный проводник Windows с фильтром расширений.
+ * «Загрузить 2D-чертёж или PDF» в `.exe`: системный проводник Windows с фильтром расширений.
  *
  * В браузере нативного диалога нет — там работает обычный `<input type="file">`. Поэтому функция
  * возвращает `null` в вебе, и вызывающий код просто кликает по скрытому полю. Плагины Tauri
@@ -7,20 +7,8 @@
  */
 import { isNativeShell } from './nativeExport';
 
-/** Расширения, которые продукт понимает: растровые чертежи, PDF и 3D. */
-export const DRAWING_EXTENSIONS = [
-  'jpg',
-  'jpeg',
-  'png',
-  'webp',
-  'pdf',
-  'step',
-  'stp',
-  'stl',
-  'obj',
-  'glb',
-  'gltf',
-] as const;
+/** Расширения, которые продукт понимает: только 2D-чертежи и PDF. */
+export const DRAWING_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'pdf'] as const;
 
 /** Имя файла из пути Windows или POSIX. */
 export function baseName(path: string): string {
@@ -41,8 +29,8 @@ export async function pickDrawingFile(): Promise<File | null> {
     const picked = await open({
       multiple: false,
       directory: false,
-      title: 'Выберите чертёж или 3D-модель',
-      filters: [{ name: 'Чертёж или 3D-модель', extensions: [...DRAWING_EXTENSIONS] }],
+      title: 'Выберите 2D-чертёж или PDF',
+      filters: [{ name: '2D-чертёж или PDF', extensions: [...DRAWING_EXTENSIONS] }],
     });
     const path = Array.isArray(picked) ? picked[0] : picked;
     if (!path) {

@@ -1,16 +1,11 @@
 /**
- * Поповер «•••»: тема цеха, состояние движка и адреса сервисов.
+ * Поповер «•••»: тема цеха, состояние движка распознавания и его адрес.
  *
  * Здесь нет настроек продукта — их не бывает. Только то, что нужно, когда «ничего не происходит»:
  * жив ли локальный движок, куда он смотрит, и светлая или тёмная тема удобнее в цеху.
  */
 import { useCallback, useEffect, useState } from 'react';
-import {
-  CAD_URL_KEY,
-  VISION_URL_KEY,
-  storeBaseUrl,
-  storedBaseUrl,
-} from '../lib/runtimeConfig';
+import { VISION_URL_KEY, storeBaseUrl, storedBaseUrl } from '../lib/runtimeConfig';
 import { checkEngines, displayEngineUrl, engineLabel, type EngineReport } from '../lib/engine';
 import { isNativeShell } from '../lib/nativeExport';
 import type { Theme } from '../lib/theme';
@@ -33,7 +28,6 @@ export function MoreMenu({ theme, onTheme }: { theme: Theme; onTheme: (theme: Th
   const [report, setReport] = useState<EngineReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [visionUrl, setVisionUrl] = useState(() => storedBaseUrl(VISION_URL_KEY));
-  const [cadUrl, setCadUrl] = useState(() => storedBaseUrl(CAD_URL_KEY));
 
   const probe = useCallback(async () => {
     setBusy(true);
@@ -48,11 +42,9 @@ export function MoreMenu({ theme, onTheme }: { theme: Theme; onTheme: (theme: Th
     void probe();
   }, [probe]);
 
-  const saveUrls = () => {
+  const saveUrl = () => {
     storeBaseUrl(VISION_URL_KEY, visionUrl.trim() || null);
-    storeBaseUrl(CAD_URL_KEY, cadUrl.trim() || null);
     setVisionUrl(storedBaseUrl(VISION_URL_KEY));
-    setCadUrl(storedBaseUrl(CAD_URL_KEY));
     void probe();
   };
 
@@ -80,8 +72,7 @@ export function MoreMenu({ theme, onTheme }: { theme: Theme; onTheme: (theme: Th
           </button>
         </div>
         <ul className="engine-list">
-          <StatusRow title="Распознавание чертежа" state={report?.vision ?? 'unknown'} url={report?.visionUrl ?? ''} />
-          <StatusRow title="3D-модели" state={report?.cad ?? 'unknown'} url={report?.cadUrl ?? ''} />
+          <StatusRow title="Распознавание 2D-чертежа" state={report?.vision ?? 'unknown'} url={report?.visionUrl ?? ''} />
         </ul>
         <p className="panel-note">
           {isNativeShell()
@@ -91,7 +82,7 @@ export function MoreMenu({ theme, onTheme }: { theme: Theme; onTheme: (theme: Th
       </section>
 
       <details className="panel-details">
-        <summary>Адреса сервисов</summary>
+        <summary>Адрес движка</summary>
         <div className="field-row">
           <label className="field">
             <span className="field-label">Распознавание</span>
@@ -104,22 +95,11 @@ export function MoreMenu({ theme, onTheme }: { theme: Theme; onTheme: (theme: Th
               onChange={(event) => setVisionUrl(event.target.value)}
             />
           </label>
-          <label className="field">
-            <span className="field-label">3D</span>
-            <input
-              type="text"
-              className="lookup"
-              value={cadUrl}
-              placeholder="по умолчанию"
-              aria-label="Адрес сервиса 3D"
-              onChange={(event) => setCadUrl(event.target.value)}
-            />
-          </label>
         </div>
-        <button type="button" className="btn btn-ghost btn-small" onClick={saveUrls}>
+        <button type="button" className="btn btn-ghost btn-small" onClick={saveUrl}>
           Сохранить и проверить
         </button>
-        <p className="panel-note">Пусто — значения по умолчанию (127.0.0.1:8000 и :8001).</p>
+        <p className="panel-note">Пусто — значение по умолчанию (127.0.0.1:8000).</p>
       </details>
     </div>
   );

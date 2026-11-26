@@ -7,7 +7,7 @@ name: Build Windows .exe
 # Что собирается:
 #   1. checks               — тесты, типы, веб-бандл, проверка нативных конфигов (быстро, Linux);
 #   2. build-windows-exe    — IKGuide Studio: установщик NSIS + переносимый .exe (Windows);
-#   3. build-engine-windows — локальный движок (vision + cad) в виде двух .exe через PyInstaller;
+#   3. build-engine-windows — локальный движок распознавания 2D-чертежей (PyInstaller, без консоли);
 #   4. build-portable-backend — архив с Python-сервисами и скриптом запуска (запасной путь).
 #
 # Джоб движка помечен `continue-on-error: true`: если PyInstaller на новой версии зависимости
@@ -168,7 +168,7 @@ jobs:
           files: C:\ikguide\artifacts\IKGuide-Studio-Setup.exe
           fail_on_unmatched_files: true
 
-  # -------------------------------------------- Локальный движок (два .exe, PyInstaller)
+  # ------------------------------------------ Локальный движок (один .exe, PyInstaller)
   build-engine-windows:
     name: Движок Python (PyInstaller)
     needs: checks
@@ -197,14 +197,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r services/vision-api/requirements.txt
-          python -m pip install -r services/cad-api/requirements.txt
+          # OCR (RapidOCR) обязателен: без него фото чертежа читается пустым.
+          python -m pip install -r services/vision-api/requirements-ocr.txt
           python -m pip install pyinstaller
 
       - name: Собрать ikguide-vision.exe
         working-directory: C:\ikguide\services\vision-api
         run: |
-          python -m PyInstaller --noconfirm --onefile --name ikguide-vision `
+          # --windowed: это sidecar, чёрное окно консоли не нужно. --collect-all: модели
+          # RapidOCR и данные onnxruntime лежат внутри пакетов, без них OCR пустой.
+          python -m PyInstaller --noconfirm --onefile --windowed --name ikguide-vision `
             --paths . --collect-submodules app `
+            --collect-all rapidocr_onnxruntime --collect-submodules onnxruntime `
             --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto `
             --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto `
             --hidden-import uvicorn.lifespan.on `
@@ -215,32 +219,16 @@ jobs:
             exit 1
           }
 
-      - name: Собрать ikguide-cad.exe
-        working-directory: C:\ikguide\services\cad-api
-        run: |
-          python -m PyInstaller --noconfirm --onefile --name ikguide-cad `
-            --paths . --collect-submodules app `
-            --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto `
-            --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto `
-            --hidden-import uvicorn.lifespan.on `
-            engine_entry.py 2>&1 | Tee-Object -FilePath C:\ikguide\ikguide-cad.log
-          if ($LASTEXITCODE -ne 0) {
-            $tail = (Get-Content C:\ikguide\ikguide-cad.log -Tail 20 | Out-String) -replace "`r?`n", ' | '
-            Write-Host "::error title=PyInstaller ikguide-cad упал::$tail"
-            exit 1
-          }
-
       - name: Сложить движок в папку engine
         run: |
           New-Item -ItemType Directory -Force -Path artifacts/engine | Out-Null
           Copy-Item services/vision-api/dist/ikguide-vision.exe artifacts/engine/
-          Copy-Item services/cad-api/dist/ikguide-cad.exe artifacts/engine/
           @'
-          IKGuide Studio: локальный движок
-          ================================
-          Положите папку engine рядом с IKGuide-Studio-Portable.exe (или в папку установки
-          установщика) — приложение само запустит оба сервиса в фоне, без окна консоли.
-          Порт 8000 — распознавание чертежа, порт 8001 — 3D-модели. Слушают только 127.0.0.1.
+          IKGuide Studio: локальный движок распознавания 2D-чертежей
+          ========================================================
+          В установщике этот файл уже лежит в папке engine — запускать вручную ничего не нужно.
+          Для переносимой сборки положите папку engine рядом с IKGuide-Studio-Portable-lite.exe.
+          Порт 8000, слушает только 127.0.0.1.
           '@ | Set-Content -Encoding UTF8 artifacts/engine/ПРОЧТИ-МЕНЯ.txt
           Get-ChildItem artifacts/engine
 
@@ -265,7 +253,7 @@ jobs:
       - name: Собрать архив с сервисами и скриптом запуска
         run: |
           mkdir -p backend-package
-          cp -r services/vision-api services/cad-api backend-package/
+          cp -r services/vision-api backend-package/
           rm -rf backend-package/*/.venv backend-package/*/__pycache__ backend-package/*/.pytest_cache
           mkdir -p backend-package/scripts
           cp scripts/start-backend.bat scripts/start-backend.sh backend-package/scripts/
@@ -277,10 +265,10 @@ jobs:
           1. Установите Python 3.11 с python.org (обязательно отметьте «Add python.exe to PATH»).
           2. Двойной щелчок по scripts\start-backend.bat — при первом запуске добавьте
              аргумент install: start-backend.bat install
-          3. Запустите IkGuide Studio: он сам обратится к сервисам на 127.0.0.1:8000 и :8001.
+          3. Запустите IkGuide Studio: он сам обратится к движку на 127.0.0.1:8000.
 
           Сервисы слушают только этот компьютер: файлы чертежей никуда не отправляются.
-          Без интернета работают и распознавание, и 3D, и сборка PDF.
+          Без интернета работают и распознавание, и сборка PDF.
           TXT
           cd backend-package && zip -r ../ikguide-backend.zip . && cd ..
           ls -la ikguide-backend.zip

@@ -1,24 +1,21 @@
 import type { IkGuideDocument } from '@ikguide/schema';
 import { bracketDocument } from './bracket';
 import { gearboxDocument } from './gearbox';
-import { up08Document } from '../lib/demo3d';
 
 /**
- * Три встроенных проекта — по одному на каждый вход:
+ * Два встроенных 2D-чертежа — оба документа лежат в бандле и открываются мгновенно, без сети:
  *  1. «Кронштейн КС-04» — чертёж с размерами, резьбой и сваркой;
- *  2. «Редуктор РД-12» — обозначения ГОСТ, которые надо расшифровать;
- *  3. «Узел привода УП-08» — сборка, схемы шагов строятся из 3D-геометрии.
+ *  2. «Редуктор РД-12» — обозначения ГОСТ, которые надо расшифровать.
  *
- * Всё лежит в бандле, поэтому примеры открываются мгновенно и без сети — это и есть «демо»
- * на главном экране и запасной вариант, если локальный бэкенд не запущен.
+ * Это и есть «демо» на главном экране и запасной вариант, если локальный движок не запущен.
  */
-export type DemoId = 'demo-bracket' | 'demo-gearbox' | 'demo-up08-3d';
+export type DemoId = 'demo-bracket' | 'demo-gearbox';
 
 export interface DemoProject {
   id: DemoId;
   title: string;
   note: string;
-  tag: '2D' | '3D';
+  tag: '2D';
   document: IkGuideDocument;
 }
 
@@ -36,13 +33,6 @@ export const DEMO_PROJECTS: readonly DemoProject[] = [
     note: 'Обозначения ГОСТ, которые надо расшифровать',
     tag: '2D',
     document: gearboxDocument,
-  },
-  {
-    id: 'demo-up08-3d',
-    title: 'Узел привода УП-08',
-    note: 'Сборка из 12 деталей, схемы строятся из 3D',
-    tag: '3D',
-    document: up08Document(),
   },
 ];
 

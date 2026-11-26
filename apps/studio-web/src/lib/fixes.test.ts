@@ -7,7 +7,6 @@ import {
   replaceToken,
   setAntiError,
   setAnnotationNote,
-  setCamera,
   setChecklistText,
   setStepText,
   setTitle,
@@ -65,12 +64,6 @@ describe('правки документа', () => {
     expect(added.steps[1]?.antiError).toEqual({ text: 'Не прижимайте пальцы под сверлом.', severity: 'warning' });
     const removed = setAntiError(added, step.id, null);
     expect(removed.steps[1]?.antiError).toBeNull();
-  });
-
-  it('ракурс 3D-схемы клампится в допустимый диапазон', () => {
-    const step = bracketDocument.steps[0]!;
-    const turned = setCamera(bracketDocument, step.id, 400, 120);
-    expect(turned.steps[0]?.cameraView).toEqual({ azimuth: 360, elevation: 89 });
   });
 
   it('название, расшифровка и чек-лист правятся точечно', () => {

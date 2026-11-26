@@ -2,20 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { DRAWING_EXTENSIONS, baseName, pickDrawingFile } from './nativeOpen';
 
 describe('нативный выбор файла', () => {
-  it('фильтр расширений покрывает растры, PDF и 3D', () => {
-    expect([...DRAWING_EXTENSIONS]).toEqual([
-      'jpg',
-      'jpeg',
-      'png',
-      'webp',
-      'pdf',
-      'step',
-      'stp',
-      'stl',
-      'obj',
-      'glb',
-      'gltf',
-    ]);
+  it('фильтр расширений — только 2D-чертежи и PDF', () => {
+    expect([...DRAWING_EXTENSIONS]).toEqual(['jpg', 'jpeg', 'png', 'webp', 'pdf']);
   });
 
   it('вытаскивает имя файла из пути Windows и POSIX', () => {

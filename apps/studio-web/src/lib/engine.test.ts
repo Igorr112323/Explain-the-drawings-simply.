@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { checkEngines, displayEngineUrl, engineLabel, healthPath, pingHealth } from './engine';
-import { CAD_URL_KEY, VISION_URL_KEY } from './runtimeConfig';
+import { checkEngines, displayEngineUrl, engineLabel, pingHealth } from './engine';
+import { VISION_URL_KEY } from './runtimeConfig';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -25,29 +25,25 @@ describe('здоровье локального движка', () => {
 
   it('сетевой отказ — это «не отвечает», а не исключение', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
-    await expect(pingHealth('http://127.0.0.1:8001')).resolves.toBe('down');
+    await expect(pingHealth('http://127.0.0.1:8000')).resolves.toBe('down');
   });
 
-  it('проверяет оба сервиса и подписывает адреса для меню', async () => {
+  it('проверяет движок распознавания и подписывает адрес для меню', async () => {
     window.localStorage.setItem(VISION_URL_KEY, 'http://192.168.1.50:8000');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok));
 
     const report = await checkEngines();
     expect(report.vision).toBe('ok');
-    expect(report.cad).toBe('ok');
     expect(report.visionUrl).toBe('http://192.168.1.50:8000');
-    expect(report.cadUrl).toBe('');
-    expect(displayEngineUrl(report.cadUrl)).toBe('через локальный прокси');
-    // Пустой адрес — это один прокси Vite: 3D спрашиваем по его префиксу, иначе оба пинга ушли бы
-    // в сервис распознавания.
     const urls = (globalThis.fetch as unknown as { mock: { calls: [string][] } }).mock.calls.map((call) => call[0]);
-    expect(urls).toEqual(expect.arrayContaining(['http://192.168.1.50:8000/health', '/v1/cad/health']));
+    expect(urls).toEqual(['http://192.168.1.50:8000/health']);
   });
 
-  it('знает, по какому пути проверять каждый сервис', () => {
-    expect(healthPath('', 'vision')).toBe('/health');
-    expect(healthPath('', 'cad')).toBe('/v1/cad/health');
-    expect(healthPath('http://127.0.0.1:8001', 'cad')).toBe('/health');
+  it('без сохранённого адреса в браузере идёт через прокси', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok));
+    const report = await checkEngines();
+    expect(report.visionUrl).toBe('');
+    expect(displayEngineUrl(report.visionUrl)).toBe('через локальный прокси');
   });
 
   it('переводит состояние в человеческие слова', () => {
@@ -67,6 +63,5 @@ describe('здоровье локального движка', () => {
       ),
     );
     await expect(pingHealth('http://127.0.0.1:8000', 10)).resolves.toBe('down');
-    expect(CAD_URL_KEY).toBe('ikguide:cad-url');
   });
 });

@@ -5,14 +5,11 @@ import { DEMO_DOCUMENTS, DEMO_PROJECTS, bracketDocument, gearboxDocument } from 
 import { isKnownIllustration } from '../art/ids';
 
 describe('built-in demo projects', () => {
-  it('contains three valid and different projects', () => {
-    expect(DEMO_DOCUMENTS).toHaveLength(3);
-    expect(DEMO_PROJECTS.map((project) => project.id)).toEqual([
-      'demo-bracket',
-      'demo-gearbox',
-      'demo-up08-3d',
-    ]);
-    expect(new Set(DEMO_DOCUMENTS.map((doc) => doc.id)).size).toBe(3);
+  it('содержит два валидных и разных 2D-примера', () => {
+    expect(DEMO_DOCUMENTS).toHaveLength(2);
+    expect(DEMO_PROJECTS.map((project) => project.id)).toEqual(['demo-bracket', 'demo-gearbox']);
+    expect(DEMO_PROJECTS.every((project) => project.tag === '2D')).toBe(true);
+    expect(new Set(DEMO_DOCUMENTS.map((doc) => doc.id)).size).toBe(2);
     for (const doc of DEMO_DOCUMENTS) {
       const result = ikGuideDocumentSchema.safeParse(doc);
       if (!result.success) {
@@ -29,10 +26,10 @@ describe('built-in demo projects', () => {
     }
   });
 
-  it('keeps the old 2D projects free of 3D data', () => {
+  it('остаются чистыми 2D: без SVG-диаграмм сборки и без 3D-полей', () => {
     for (const doc of [bracketDocument, gearboxDocument]) {
-      expect(doc.assembly3d).toBeUndefined();
       expect(doc.steps.every((step) => step.svgDiagram === undefined)).toBe(true);
+      expect(doc.steps.every((step) => step.cropPercent === undefined)).toBe(true);
     }
   });
 

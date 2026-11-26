@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Главное окно IKGuide Studio: нативный проводник для чертежей и 3D, нативное «Сохранить как…» и запись готового PDF.",
+  "description": "Главное окно IKGuide Studio: нативный проводник для 2D-чертежей и PDF, нативное «Сохранить как…» и запись готового PDF.",
   "windows": [
     "main"
   ],
