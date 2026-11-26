@@ -206,7 +206,7 @@ Tauri v2, вся логика WebView2/ярлыков/удаления сохр�
 | `services/vision-api` | pytest: API, препроцессинг и апскейл мелких листов, извлечение, таблица позиций и виды, геометрия, ROI |
 
 Гейты: `npm test`, `npm run typecheck`, `npm run build`, `npm run test:vision`, `npm run check:native`
-(144 проверки конфигов Tauri, NSIS-шаблона, картинок мастера, sidecar и workflow).
+(145 проверок конфигов Tauri, NSIS-шаблона, картинок мастера, sidecar и workflow).
 
 ## 8. Что удалено и почему
 
