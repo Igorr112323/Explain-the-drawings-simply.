@@ -221,6 +221,7 @@ check(
   /build-engine-windows:[\s\S]{0,400}continue-on-error:\s*true/.test(releaseYaml),
 );
 check('release: архив локального бэкенда', releaseYaml.includes('ikguide-backend'));
+check('release: бэкенд не прикрепляется к релизу (один файл)', !/files:\s*ikguide-backend\.zip/.test(releaseYaml));
 check('release: тэг v* + workflow_dispatch', releaseYaml.includes('tags:') && releaseYaml.includes('workflow_dispatch'));
 
 /* ------------------------------------------------------------------ Удалённое */

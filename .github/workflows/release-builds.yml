@@ -293,13 +293,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Прикрепить к Release (только по тегу)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ikguide-backend.zip
-          fail_on_unmatched_files: false
-
+      # Архив бэкенда остаётся в артефактах: в релизе — ровно один файл, установщик.
   # ----------------------------------------------------------------- Сводка
   summary:
     name: Итог
