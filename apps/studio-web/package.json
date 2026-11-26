@@ -1,0 +1,27 @@
+{
+  "name": "@ikguide/studio-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "IkGuide Studio: shared React UI for the shop-floor app (Capacitor .apk) and the engineer desktop editor (Tauri .exe).",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ikguide/gost-translator": "*",
+    "@ikguide/schema": "*",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "vite": "^5.4.11"
+  }
+}

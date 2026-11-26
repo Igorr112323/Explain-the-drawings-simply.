@@ -1,0 +1,14 @@
+node_modules/
+dist/
+dist-ssr/
+coverage/
+*.local
+.DS_Store
+.vite/
+*.log
+.env
+.env.*
+!.env.example
+src-tauri/target/
+android/.gradle/
+android/app/build/

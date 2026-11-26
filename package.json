@@ -1,0 +1,28 @@
+{
+  "name": "ikguide",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "IkGuide — drawing to IKEA-style instruction platform: GOST/ESKD core, worker app and engineer studio.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "dev": "npm run dev -w @ikguide/studio-web",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "npm run build --workspaces --if-present",
+    "build:packages": "npm run build -w @ikguide/schema -w @ikguide/gost-translator"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}
