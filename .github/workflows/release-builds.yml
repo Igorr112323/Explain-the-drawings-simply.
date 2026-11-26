@@ -88,9 +88,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          # Глоб-движок setup-node понимает только прямые слэши.
-          cache-dependency-path: C:/ikguide/package-lock.json
+          # Без cargo/npm-кэшей: оба действия ожидают штатный $GITHUB_WORKSPACE, а рабочая папка
+          # здесь — C:\ikguide (имя репозитория кончается точкой). Пара минут важнее надёжности.
 
       - name: Rust stable (MSVC)
         uses: dtolnay/rust-toolchain@stable
