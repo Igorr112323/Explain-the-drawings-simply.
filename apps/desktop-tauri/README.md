@@ -44,7 +44,7 @@ GitHub Actions: workflow **Build Windows .exe** (`.github/workflows/release-buil
 
 | Артефакт | Что внутри |
 | --- | --- |
-| `ikguide-studio-windows` | `IKGuide-Studio-Setup.exe` (NSIS, всё внутри), `IKGuide-Studio.msi`, `IKGuide-Studio-Portable-lite.exe` (без движка) |
+| `ikguide-studio-windows` | `IKGuide-Studio-Setup.exe` (NSIS, всё внутри), `IKGuide-Studio-Portable-lite.exe` (без движка) |
 | `ikguide-engine-windows` | `engine/ikguide-vision.exe`, `engine/ikguide-cad.exe` (PyInstaller) — они же вшиваются в установщик |
 | `ikguide-backend` | архив с Python-сервисами и `scripts/start-backend.bat` для случая «движок уже стоит отдельно» |
 

@@ -195,6 +195,7 @@ check('release: rust-toolchain', releaseYaml.includes('dtolnay/rust-toolchain'))
 check('release: нет Android/.apk', !/apk|android|capacitor|gradle/i.test(releaseYaml));
 check('release: артефакт .exe', releaseYaml.includes('ikguide-studio-windows'));
 check('release: лёгкий portable без движка (только артефакты)', releaseYaml.includes('IKGuide-Studio-Portable-lite.exe'));
+check('release: MSI не собираем (WiX падает на кириллице)', !releaseYaml.includes('nsis,msi'));
 check(
   'release: Windows-джобы обходят имя репозитория с точкой на конце',
   (releaseYaml.match(/git clone[^\n]*ikguide/g) ?? []).length >= 2,
