@@ -5,7 +5,7 @@
  * `gost-translator`, что собирает шпаргалку PDF. Ниже — лист чертежа с пинами распознанных
  * обозначений и список: автоперевод можно переписать, правка уйдёт в PDF.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { XrayAnnotation } from '@ikguide/schema';
 import { translateEngineeringNotation } from '@ikguide/gost-translator';
 import type { PipelineApi } from '../state/pipeline';
@@ -25,6 +25,15 @@ export function XrayPanel({
   const [query, setQuery] = useState('');
   const lookup = useMemo(() => (query.trim() ? translateEngineeringNotation(query) : null), [query]);
   const lookupWarnings = lookup && 'warnings' in lookup ? (lookup.warnings as string[]) : [];
+
+  // Клик по пину на листе открывает панель — сразу показываем ту же строку в списке.
+  useEffect(() => {
+    if (!selectedId) {
+      return;
+    }
+    const row = document.querySelector(`[data-annotation="${selectedId}"]`);
+    row?.scrollIntoView?.({ block: 'nearest' });
+  }, [selectedId]);
 
   return (
     <div className="panel">
