@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type jsQRType from 'jsqr';
 import { readDataUrl } from '../../lib/download';
-import { listGuides } from '../../lib/offlineStore';
+import { getGuideByCode } from '../../lib/offlineStore';
 import { decodeGuidePayload, extractGuideId } from '../../lib/qrBridge';
+import { fetchPublishedGuide, readPublishedLink } from '../../lib/publishedGuides';
 import { useStudio } from '../../state/studio';
 import { Modal } from './Modal';
 
@@ -65,23 +66,49 @@ export function QrScannerDialog({ onClose }: { onClose: () => void }) {
         stopCamera();
         onClose();
       } catch (error) {
-        // A studio link (`?guide=<id>`) carries only an id: resolve it against what is already here.
-        const id = extractGuideId(text);
-        const known = id
-          ? (await listGuides()).find((entry) => entry.id === id) ??
-            state.docs.find((candidate) => candidate.id === id)
-          : undefined;
-        if (known) {
-          const doc = 'doc' in known ? known.doc : known;
-          await adoptGuide(doc, 'qr');
-          dispatch({ type: 'SHOW_TOAST', tone: 'success', text: `Инструкция «${doc.metadata.title}» открыта с сервера.` });
-          doneRef.current = true;
-          stopCamera();
-          onClose();
-          return;
+        // A short link carries only a code: `…/?guideId=<code>&api=http://192.168.1.50:8000` lives on the
+        // workshop server, `?guide=<id>` is resolved against what is already on the device.
+        const published = readPublishedLink(text);
+        const id = published?.guideId ?? extractGuideId(text);
+        if (id) {
+          try {
+            const doc = await fetchPublishedGuide(id, { baseUrl: published?.api ?? undefined });
+            await adoptGuide(doc, 'published', 'prep', { publishedCode: id });
+            dispatch({
+              type: 'SHOW_TOAST',
+              tone: 'success',
+              text: `Инструкция «${doc.metadata.title}» скачана с цехового сервера и доступна офлайн.`,
+            });
+            doneRef.current = true;
+            stopCamera();
+            onClose();
+            return;
+          } catch {
+            // Server unreachable or the code is unknown: the locally saved copy is still worth opening.
+          }
+          const known = (await getGuideByCode(id)) ?? state.docs.find((candidate) => candidate.id === id);
+          if (known) {
+            const doc = 'doc' in known ? known.doc : known;
+            await adoptGuide(doc, 'qr');
+            dispatch({
+              type: 'SHOW_TOAST',
+              tone: 'success',
+              text: `Инструкция «${doc.metadata.title}» открыта из памяти устройства.`,
+            });
+            doneRef.current = true;
+            stopCamera();
+            onClose();
+            return;
+          }
         }
         setStatus('error');
-        setMessage(error instanceof Error ? error.message : 'Код не распознан.');
+        setMessage(
+          id
+            ? `Инструкции с кодом «${id}» нет ни на устройстве, ни на цеховом сервере. Проверьте, что ноутбук цеха включён и телефон в той же сети.`
+            : error instanceof Error
+              ? error.message
+              : 'Код не распознан.',
+        );
       }
     },
     [adoptGuide, dispatch, onClose, state.docs, stopCamera],

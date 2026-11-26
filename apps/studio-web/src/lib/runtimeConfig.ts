@@ -382,21 +382,25 @@ export function defaultWorkshopBaseUrl(
   return `http://${host}:5173`;
 }
 
-/** Reads `?guide=<id>` — the «QR по цеховой ссылке» route to an instruction stored on the server. */
+/**
+ * Reads the code of an instruction from the location: `?guideId=<code>` (published-guide link, the
+ * one the workshop QR carries) or `?guide=<id>` (the stage-4 «QR по цеховой ссылке»).
+ */
 export function readGuideIdFromLocation(
   loc: { search?: string; hash?: string } | null = currentLocation(),
 ): string | null {
   if (!loc) {
     return null;
   }
-  const fromSearch = new URLSearchParams(loc.search ?? '').get('guide');
+  const fromParams = (params: URLSearchParams): string | null => params.get('guideId') ?? params.get('guide');
+  const fromSearch = fromParams(new URLSearchParams(loc.search ?? ''));
   if (fromSearch) {
     return fromSearch;
   }
   const hash = loc.hash ?? '';
   const questionMark = hash.indexOf('?');
   if (questionMark >= 0) {
-    const fromHash = new URLSearchParams(hash.slice(questionMark + 1)).get('guide');
+    const fromHash = fromParams(new URLSearchParams(hash.slice(questionMark + 1)));
     if (fromHash) {
       return fromHash;
     }

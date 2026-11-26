@@ -361,8 +361,16 @@ interface StudioContextValue {
   isQcComplete: boolean;
   /** Re-reads the offline library (after saving, deleting or pinning an instruction). */
   refreshOffline: () => Promise<void>;
-  /** Saves an instruction on this device and opens it — the single path for scans and QR links. */
-  adoptGuide: (doc: IkGuideDocument, source: StoredGuide['source'], screen?: WorkerScreen) => Promise<void>;
+  /**
+   * Saves an instruction on this device and opens it — the single path for scans and QR links.
+   * `publishedCode` remembers the short code of a published guide, so the same link works offline.
+   */
+  adoptGuide: (
+    doc: IkGuideDocument,
+    source: StoredGuide['source'],
+    screen?: WorkerScreen,
+    options?: { publishedCode?: string },
+  ) => Promise<void>;
   /** True when the current shell may show the engineer editor at all. */
   canEngineer: boolean;
 }
@@ -384,9 +392,18 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const adoptGuide = useCallback(
-    async (incoming: IkGuideDocument, source: StoredGuide['source'], screen: WorkerScreen = 'prep') => {
+    async (
+      incoming: IkGuideDocument,
+      source: StoredGuide['source'],
+      screen: WorkerScreen = 'prep',
+      options: { publishedCode?: string } = {},
+    ) => {
       dispatch({ type: 'ADOPT_GUIDE', doc: incoming, screen });
-      await persistGuide(incoming, { source, savedAt: new Date().toISOString() });
+      await persistGuide(incoming, {
+        source,
+        savedAt: new Date().toISOString(),
+        ...(options.publishedCode ? { publishedCode: options.publishedCode } : {}),
+      });
       const guides = await listGuides();
       dispatch({ type: 'SET_OFFLINE_GUIDES', guides });
     },

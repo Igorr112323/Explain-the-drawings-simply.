@@ -4,6 +4,7 @@ import { bracketDocument, gearboxDocument } from '../data/demos';
 import {
   clearAllGuides,
   getGuide,
+  getGuideByCode,
   listGuides,
   persistGuide,
   removeGuide,
@@ -40,6 +41,20 @@ describe('offline library', () => {
     const single = await getGuide(bracketDocument.id);
     expect(single?.doc.id).toBe(bracketDocument.id);
     expect(await getGuide('nope')).toBeNull();
+  });
+
+  it('finds a published copy by its short shop-floor code and keeps that code on re-save', async () => {
+    await saveGuide(bracketDocument, { source: 'published', publishedCode: 'pay88sbx' });
+
+    expect((await getGuideByCode('pay88sbx'))?.doc.id).toBe(bracketDocument.id);
+    expect((await getGuideByCode(bracketDocument.id))?.doc.id).toBe(bracketDocument.id);
+    expect(await getGuideByCode('nope0000')).toBeNull();
+
+    // Pinning or re-saving must not forget how the phone found this instruction.
+    await setPinned(bracketDocument.id, true);
+    expect((await getGuide(bracketDocument.id))?.publishedCode).toBe('pay88sbx');
+    await saveGuide(bracketDocument, { source: 'scan' });
+    expect((await getGuide(bracketDocument.id))?.publishedCode).toBe('pay88sbx');
   });
 
   it('keeps the newest first and pinned instructions above them', async () => {

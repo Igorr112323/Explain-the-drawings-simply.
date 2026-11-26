@@ -3899,6 +3899,60 @@ code {
   padding: 18px;
 }
 
+.qr-code {
+  margin: 4px 0 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.qr-code code {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  background: var(--surface-2, rgba(0, 0, 0, 0.05));
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+.qr-publish-actions {
+  margin: 8px 0 10px;
+  flex-wrap: wrap;
+}
+
+.qr-publish-list {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.qr-publish-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.qr-publish-row code {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.qr-publish-row.is-current {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.qr-publish-row span:nth-child(2) {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .qr-too-large strong {
   color: var(--danger);
   font-size: 15px;

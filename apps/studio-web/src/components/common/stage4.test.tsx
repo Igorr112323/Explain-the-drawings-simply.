@@ -120,10 +120,14 @@ describe('stage 4 UI', () => {
   it('opens the QR dialog and honestly refuses a code that cannot hold the guide', async () => {
     await renderApp();
     await click(byText('QR-код'));
+    // Stage 5 adds the default «publish to the shop» tab; jsdom has no workshop server, and the dialog
+    // says so instead of showing a link that would not work.
+    expect(container.textContent).toContain('Опубликовать в цех');
     expect(container.textContent).toContain('Инструкция в QR');
     expect(container.textContent).toContain('QR по цеховой ссылке');
     expect(container.textContent).toContain('Скачать автономный офлайн-пакет');
     expect(container.textContent).toContain('Экспорт автономного HTML-файла');
+    await click(byText('Инструкция в QR'));
     // The 6-step demo is ~4–5 KB: it cannot be a QR, and the dialog says so instead of pretending.
     expect(container.textContent).toMatch(/Не помещается в один QR|Упакованы все шаги/);
     await click(byText('QR по цеховой ссылке'));

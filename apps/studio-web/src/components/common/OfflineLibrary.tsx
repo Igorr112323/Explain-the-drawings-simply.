@@ -13,6 +13,7 @@ const SOURCE_LABEL: Record<StoredGuide['source'], string> = {
   engineer: 'из редактора',
   scan: 'со сканера',
   qr: 'по QR',
+  published: 'с цехового сервера',
   import: 'из файла',
   demo: 'встроенная',
 };

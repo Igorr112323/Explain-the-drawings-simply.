@@ -10,7 +10,7 @@
  */
 import { ikGuideDocumentSchema, type IkGuideDocument } from '@ikguide/schema';
 
-export type GuideSource = 'engineer' | 'scan' | 'qr' | 'import' | 'demo';
+export type GuideSource = 'engineer' | 'scan' | 'qr' | 'published' | 'import' | 'demo';
 
 export interface StoredGuide {
   id: string;
@@ -20,12 +20,18 @@ export interface StoredGuide {
   source: GuideSource;
   /** «Доступно офлайн»: the worker sees it in the pinned block of the home screen. */
   pinned: boolean;
+  /**
+   * Short publication code this copy came from (`?guideId=<code>`). The document keeps its own id,
+   * so without this code the published link could not find the saved copy offline.
+   */
+  publishedCode?: string;
 }
 
 export interface SaveGuideOptions {
   source?: GuideSource;
   pinned?: boolean;
   savedAt?: string;
+  publishedCode?: string;
 }
 
 export type StoreBackend = 'indexeddb' | 'localstorage' | 'memory';
@@ -148,6 +154,7 @@ function normalize(entry: StoredGuide): StoredGuide | null {
     savedAt: entry.savedAt,
     source: entry.source,
     pinned: Boolean(entry.pinned),
+    ...(entry.publishedCode ? { publishedCode: entry.publishedCode } : {}),
   };
 }
 
@@ -195,6 +202,7 @@ export async function saveGuide(doc: IkGuideDocument, options: SaveGuideOptions 
     savedAt: options.savedAt ?? new Date().toISOString(),
     source: options.source ?? 'engineer',
     pinned: options.pinned ?? false,
+    ...(options.publishedCode ? { publishedCode: options.publishedCode } : {}),
   };
 
   if (resolveBackend() !== 'indexeddb') {
@@ -203,6 +211,9 @@ export async function saveGuide(doc: IkGuideDocument, options: SaveGuideOptions 
     const previous = readFallback().find((item) => item.id === entry.id);
     if (previous && options.pinned === undefined) {
       entry.pinned = previous.pinned;
+    }
+    if (previous?.publishedCode && !options.publishedCode) {
+      entry.publishedCode = previous.publishedCode;
     }
     writeFallback([...guides, entry]);
     return entry;
@@ -223,6 +234,9 @@ export async function saveGuide(doc: IkGuideDocument, options: SaveGuideOptions 
         if (previous && options.pinned === undefined) {
           entry.pinned = previous.pinned;
         }
+        if (previous?.publishedCode && !options.publishedCode) {
+          entry.publishedCode = previous.publishedCode;
+        }
         store.put(entry);
       };
       tx.oncomplete = () => resolve(entry);
@@ -236,6 +250,20 @@ export async function saveGuide(doc: IkGuideDocument, options: SaveGuideOptions 
 export async function getGuide(id: string): Promise<StoredGuide | null> {
   const guides = await listGuides();
   return guides.find((guide) => guide.id === id) ?? null;
+}
+
+/** A stored instruction by document id, short publication code, or anything in between. */
+export async function getGuideByCode(code: string): Promise<StoredGuide | null> {
+  const wanted = code.trim();
+  if (!wanted) {
+    return null;
+  }
+  const guides = await listGuides();
+  return (
+    guides.find(
+      (guide) => guide.id === wanted || guide.doc.id === wanted || guide.publishedCode === wanted,
+    ) ?? null
+  );
 }
 
 export async function removeGuide(id: string): Promise<void> {
@@ -265,7 +293,12 @@ export async function setPinned(id: string, pinned: boolean): Promise<void> {
   if (!guide) {
     return;
   }
-  await saveGuide(guide.doc, { source: guide.source, pinned, savedAt: guide.savedAt });
+  await saveGuide(guide.doc, {
+    source: guide.source,
+    pinned,
+    savedAt: guide.savedAt,
+    ...(guide.publishedCode ? { publishedCode: guide.publishedCode } : {}),
+  });
 }
 
 export async function clearAllGuides(): Promise<void> {

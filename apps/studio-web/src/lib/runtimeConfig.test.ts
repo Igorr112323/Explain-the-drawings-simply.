@@ -129,6 +129,8 @@ describe('settings persistence', () => {
 describe('QR payload in the address bar', () => {
   it('reads ?guide= links from the address bar', () => {
     expect(readGuideIdFromLocation({ search: '?guide=guide-ks04-bracket' })).toBe('guide-ks04-bracket');
+    // Stage 5: published-guide links carry the short code in `guideId`.
+    expect(readGuideIdFromLocation({ search: '?guideId=pay88sbx&api=http%3A%2F%2F192.168.1.50%3A8000' })).toBe('pay88sbx');
     expect(readGuideIdFromLocation({ search: '', hash: '#/?guide=demo-up08-3d' })).toBe('demo-up08-3d');
     expect(readGuideIdFromLocation({ search: '?g=abc' })).toBeNull();
     expect(readGuideIdFromLocation(null)).toBeNull();

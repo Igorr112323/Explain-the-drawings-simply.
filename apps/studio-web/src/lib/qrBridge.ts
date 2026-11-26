@@ -281,18 +281,30 @@ export function extractPayload(input: string): string | null {
   }
 }
 
-/** `ikguide://guide/<id>` deep links exported in the QR dialog of stage 1 stay readable. */
+/**
+ * Codes carried by a link, in the order the bridges introduced them:
+ *   `?guideId=<code>` — the published-guide link (`…/?guideId=pay88sbx&api=http://192.168.1.50:8000`);
+ *   `?guide=<id>`     — the stage-4 workshop link resolved against the offline library;
+ *   `ikguide://guide/<id>` — the stage-1 deep link exported in the QR dialog.
+ */
 export function extractGuideId(input: string): string | null {
   const match = /^ikguide:\/\/guide\/([\w.:-]+)$/.exec(input.trim());
   if (match) {
     return match[1]!;
   }
+  if (/^[\w.:-]{4,64}$/.test(input.trim())) {
+    return input.trim();
+  }
   try {
     const parsed = new URL(input.trim(), 'https://ikguide.local/');
-    if (parsed.pathname.endsWith('/guide') || parsed.searchParams.has('guide')) {
-      const fromQuery = parsed.searchParams.get('guide');
-      if (fromQuery) {
-        return fromQuery;
+    const fromQuery = parsed.searchParams.get('guideId') ?? parsed.searchParams.get('guide');
+    if (fromQuery) {
+      return fromQuery;
+    }
+    if (parsed.pathname.endsWith('/guide') || parsed.pathname.includes('/guide/')) {
+      const last = parsed.pathname.split('/').filter(Boolean).pop();
+      if (last && /^[\w.:-]+$/.test(last)) {
+        return last;
       }
     }
   } catch {

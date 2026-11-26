@@ -38,7 +38,8 @@
   services/vision-api (Python FastAPI)        @ikguide/builder
   /v1/recognize · /v1/recognize/roi    →      vision-ответ → черновик
   OpenCV + PyMuPDF + RapidOCR                 инструмент, 5 стадий, QC,
-  (только обозначения и координаты)           xrayAnnotations, ручные шифры
+  /v1/guides · /v1/network-info · «/» = UI    xrayAnnotations, ручные шифры
+  (только обозначения и координаты)           (guides.py · network.py · studio_static.py)
                                  │
                                  ▼
                        .ikguide.json (schemaVersion "1.0")
@@ -65,6 +66,9 @@
 | `Assembly3D` / `AssemblyPart` | `packages/ikguide-schema/src/schema.ts` | Необязательный блок 3D-сборки: GLB (data URL или ссылка), формат-источник, габариты, детали с `nodeName`, ролью, номером шага и вектором сборки |
 | `CadImportResponse` | `packages/ikguide-builder/src/types.ts` | Ответ `POST /v1/cad/import`: детали, шаги с готовым SVG, base64-GLB, предупреждения, статистика |
 | `CadChangeSummary` | там же | Что изменилось при слиянии ревизий: `added`, `removed`, `changed`, `keptEdits` |
+| `PublishedGuideSummary` / `PublishGuideResult` | `apps/studio-web/src/lib/publishedGuides.ts` | Карточка публикации на цеховом сервере: код, размер, наличие 3D, `deduplicated`, `absoluteUrl` |
+| `WorkshopNetworkInfo` / `LocalAddress` | `lib/publishedGuides.ts` · `services/vision-api/app/network.py` | Как сервер видит себя в цеховой сети: `lan` / `link-local` / `loopback`, порт, `suggestedApiBase` |
+| `StoredGuide.publishedCode` | `apps/studio-web/src/lib/offlineStore.ts` | Связь офлайн-копии с коротким кодом публикации: без неё ссылка из QR не нашла бы инструкцию без сервера |
 
 Слой подсветки (`shapeId → accent | danger | done`) — это и есть «2D-слои» из брифа: один и тот же SVG
 перекрашивается под текущий шаг, поэтому не нужно рисовать отдельную иллюстрацию на каждое действие.
@@ -414,12 +418,125 @@ YAML-парсер, CRLF у `.bat`). Компиляцию выполняют ра
 
 ---
 
-## 7. Качество и CI
+## 7. Этап 5 — мгновенный цеховой QR-мост (реализован)
+
+Проблема этапа 4 формулировалась одной строкой: в QR влезает 2.5 КБ, а шестишаговая инструкция с
+3D-узлом — это мегабайты. Этап 5 меняет направление передачи: тяжёлое остаётся на ноутбуке цеха, а в
+коде едет **адрес**.
+
+```
+инженер                         ноутбук цеха (LAN)                       телефон рабочего
+   │  POST /v1/guides (документ)      │                                        │
+   ├─────────────────────────────────▶│  data/guides/<код>.json                 │
+   │  201 {id, guideId, absoluteUrl}  │                                        │
+   ◀─────────────────────────────────┤                                        │
+   │  QR: http://192.168.1.50:8000/?guideId=<код>&api=http://192.168.1.50:8000│
+   ├──────────────────────────────────────────────────────────────────────────▶│
+   │                                  │  GET / (студия из dist)                │
+   │                                  ◀────────────────────────────────────────┤
+   │                                  │  GET /v1/guides/<код> (весь документ)  │
+   │                                  ◀────────────────────────────────────────┤
+   │                                  │  IndexedDB: инструкция + publishedCode │
+```
+
+### 7.1 Контракт API (`services/vision-api/app/main.py`)
+
+| Метод | Путь | Ответ | Ошибки |
+| --- | --- | --- | --- |
+| `POST` | `/v1/guides` | `201 {id, guideId, title, drawingCode, revision, createdAt, sizeBytes, has3d, steps, url, absoluteUrl, deduplicated}` | `400` пустое тело / битый JSON, `413` > 64 МБ (по `Content-Length` и по факту), `422` документ не прошёл проверку |
+| `GET` | `/v1/guides?limit=` | `{count, guides[]}` — новые первыми, без тяжёлых тел | — |
+| `GET` | `/v1/guides/{код}` | сам `IkGuideDocument` + `access-control-allow-origin: *` (телефон может быть на другом origin) | `400` код не по алфавиту, `404` нет такой публикации |
+| `GET` | `/v1/network-info` | `{status, hostname, primary, primaryIsLan, addresses[], guidePort, suggestedApiBase, studioAvailable}` | — |
+| `GET` | `/` | `text/html` → `index.html` студии; иначе JSON с `studio: {available, path}` | — |
+
+Коды регистронезависимы (`/v1/guides/PGCVBPV3` отдаёт ту же инструкцию): ссылку диктуют голосом и
+печатают руками, и «большая буква» не должна ломать смену.
+
+### 7.2 Хранилище публикаций — `app/guides.py`
+- Алфавит кода — `abcdefghijkmnpqrstuvwxyz23456789` (8 символов): без `0/o/1/l`, чтобы `pgcvbpv3` нельзя
+  было прочитать «по-своему».
+- Запись атомарная: `<код>.json.tmp` → `os.replace`, рядом `<код>.summary.json` (карточка без тела +
+  `sha256`) — список публикаций не читает мегабайты с диска.
+- Дедупликация по `sha256` канонического JSON (сортированные ключи): повторная публикация того же
+  документа возвращает тот же код и `deduplicated: true`.
+- Вытеснение: не больше `MAX_STORED_GUIDES = 200` документов, порядок — по монотонному `seq`
+  (`time.time_ns()` на момент публикации), а не по `st_mtime`: у трёх файлов, записанных за одну
+  миллисекунду, `mtime` может совпасть, и «самый старый» стал бы случайным.
+- Безопасность имён: `GUIDE_ID_RE = ^[a-z0-9]{6,12}$`, плюс проверка `self.root not in path.parents` —
+  `../`, `%2e%2e` и `abcdefgh.json` отсекаются до касания диска.
+- Валидация документа до записи: обязательные `schemaVersion, id, metadata, steps, bom, tools, qcChecklist`,
+  непустые `steps/bom/tools/qcChecklist`, `metadata.title` и `metadata.drawingCode`. Ошибка объясняется
+  по-русски (`GuideError(status, message, code)`), а не «422».
+
+### 7.3 Адрес цеха — `app/network.py`
+`collect_addresses()` собирает кандидатов из трёх источников и сортирует: (1) адрес исходящего
+интерфейса через UDP-«подключение» к `8.8.8.8:80` (пакеты не отправляются), (2) `IKGUIDE_LAN_IP`,
+(3) `socket.gethostbyname_ex`. Классификация честная: `lan` / `link-local` / `loopback` / `other`;
+`169.254.x.x` — это «сеть не найдена», и подсказывать её телефону нельзя, поэтому `primaryIsLan: false`.
+Если LAN-адреса нет вовсе, ответ всё равно валиден: `addresses[0] = 127.0.0.1`, и UI показывает
+предупреждение вместо ссылки на `localhost`.
+
+`_public_base(request)` в `main.py` подменяет loopback в `absoluteUrl`: инженер публикует с ноутбука
+через `127.0.0.1:8000`, но телефону нужен `192.168.1.50:8000`.
+
+### 7.4 Раздача студии — `app/studio_static.py`
+`resolve_studio_dist()` ищет бандл в порядке: `IKGUIDE_STUDIO_DIST` → `apps/studio-web/dist` →
+`services/vision-api/studio`; обязателен `index.html`. `mount_studio(app, dist)` вешает `/assets` и
+`/studio` (`html=True`) **последними**, а `/` разбирает `Accept` сам: `text/html` → `FileResponse`
+(ссылка из QR открывается в браузере телефона как обычный сайт), иначе — прежний JSON `/health`-стиля.
+Если бандла нет, сервис работает как раньше: API и `/v1/guides` не зависят от сборки фронтенда.
+
+### 7.5 Фронтенд — `apps/studio-web/src/lib/publishedGuides.ts`
+```
+publishGuide(doc, {baseUrl})        → POST  /v1/guides          (таймаут 60 с: 3D по Wi-Fi)
+fetchPublishedGuide(код, {baseUrl}) → GET   /v1/guides/<код>    + проверка Zod-схемой
+fetchPublishedGuides({limit})       → GET   /v1/guides?limit=
+fetchWorkshopNetworkInfo()          → GET   /v1/network-info    (никогда не бросает, null при сбое)
+buildPublishedLink(base, код)       → <base>/?guideId=<код>&api=<base>
+readPublishedLink(location|text)    → {guideId, api} | null
+```
+Ошибки типизированы (`GuidePublishError.kind` = `offline | rejected | too-large | invalid | not-found`),
+поэтому UI пишет «Цеховой сервер не отвечает по адресу …», «Инструкция больше 64 МБ…» или текст сервера,
+а не «500». `pickLanApiBase(info)` выбирает LAN-адрес, `formatGuideSize()` печатает «2,4 МБ».
+
+Диалог QR (`components/common/QrDialog.tsx`) получил третью — и теперь первую — вкладку
+**«Опубликовать в цех»**: при открытии он публикует документ, показывает код, размер на сервере, наличие
+3D, короткую ссылку с кнопкой «Скопировать», список последних публикаций сервера и большой QR. Если
+адрес остался `localhost`, диалог честно пишет «QR ещё нельзя напечатать» и предлагает вписать LAN-IP;
+если сервер отказал — предлагает автономный QR (вкладка `payload`), пакет `.ikguide.json` и HTML.
+
+### 7.6 Сквозной путь на телефоне
+- `useBootLink()` (`App.tsx`) читает `?guideId=<код>&api=<адрес>`: адрес сохраняется в настройки
+  (`SET_SETTINGS` + `localStorage`), затем `fetchPublishedGuide` → `adoptGuide(doc, 'published', 'prep',
+  {publishedCode: код})`. Сбой сети → берётся сохранённая копия, о чём сообщается тостом.
+- `QrScannerDialog` разбирает ту же ссылку сканером (`readPublishedLink`), тянет документ с указанного в
+  `api` сервера, а при недоступности ищет копию на устройстве; код, которого нет нигде, объясняется
+  фразой «нет ни на устройстве, ни на цеховом сервере».
+- `offlineStore.ts`: к `StoredGuide` добавлен `publishedCode` — короткий код публикации. Документ хранит
+  свой `id`, поэтому без этой связи ссылка из QR не нашла бы копию офлайн. Поле переживает пин и
+  повторное сохранение; `getGuideByCode()` ищет по `id`, `doc.id` и `publishedCode`.
+- `extractGuideId()` понимает все три поколения ссылок: `?guideId=` (этап 5), `?guide=` (этап 4),
+  `ikguide://guide/<id>` (этап 1).
+
+### 7.7 Тесты этапа 5
+- `services/vision-api/tests/test_guides.py` (30): публикация/дедупликация/вытеснение по `seq`, кривые
+  коды и обход путей, пустое тело и битый JSON, 413, `absoluteUrl` для телефона, `/v1/network-info`,
+  классификация адресов (`link-local` ≠ цех), поиск и монтирование студии, разбор `Accept` на `/`.
+- `apps/studio-web/src/lib/publishedGuides.test.ts` (18): сборка и разбор ссылок всех поколений, POST и
+  его ошибки (413/422/сеть), проверка схемы при скачивании, список без тяжёлых тел, выбор LAN-адреса.
+- `apps/studio-web/src/components/common/stage5.test.tsx` (6): бутстрап по ссылке (документ офлайн +
+  запомненный адрес), откат на сохранённую копию, публикация из диалога и короткая ссылка в QR, отказ
+  сервера → автономный QR, скан опубликованной ссылки, неизвестный код.
+- `offlineStore.test.ts` (+1): `publishedCode` находится по коду и переживает пин/пересохранение.
+
+---
+
+## 8. Качество и CI
 
 | Гейт | Команда | Текущий результат |
 | --- | --- | --- |
-| Unit-тесты | `npm test` | 242 теста, 23 файла, зелёные |
-| Сервис распознавания | `npm run test:vision` | 98 pytest, зелёные |
+| Unit-тесты | `npm test` | 267 тестов, 25 файлов, зелёные |
+| Сервис распознавания | `npm run test:vision` | 129 pytest, зелёные |
 | Сервис 3D-моделей | `npm run test:cad` | 44 pytest, зелёные |
 | Типы | `npm run typecheck` | 0 ошибок, strict |
 | Сборка | `npm run build` | пакеты `tsc` + Vite OK; three.js и jsQR — отдельные чанки |
@@ -441,7 +558,7 @@ YAML-парсер, CRLF у `.bat`). Компиляцию выполняют ра
 
 ---
 
-## 8. Риски и как мы их снимаем
+## 9. Риски и как мы их снимаем
 
 | Риск | Влияние | Мера |
 | --- | --- | --- |
@@ -454,12 +571,14 @@ YAML-парсер, CRLF у `.bat`). Компиляцию выполняют ра
 | Потеря документа | Проcтой | Экспорт `.ikguide.json`, офлайн-библиотека (IndexedDB + резерв), автономный HTML, QR с контрольной суммой |
 | QR не вмещает инструкцию | Рабочий не получит шаги | Лестница деградации с честными предупреждениями, `tooLarge` → цеховая ссылка/пакет/HTML; каждая ступень проверяется схемой |
 | Планшет ищет сервер не там | «Сервис недоступен» на ровном месте | Адрес вводится в UI, «Проверить связь» показывает OpenCV/OCR/STEP и задержку, LAN-подсказка, `sanitizeBaseUrl` не пропускает адрес без схемы |
-| Нативная сборка ломается незаметно | Нет `.exe`/`.apk` к обещанному сроку | `check:native` (125 проверок) в CI на каждый push; релизная сборка запускается вручную до тега |
+| Нативная сборка ломается незаметно | Нет `.exe`/`.apk` к обещанному сроку | `check:native` (127 проверок) в CI на каждый push; релизная сборка запускается вручную до тега |
 | Камера запрещена политикой планшета | Сканер не работает | Галерея + ручная ссылка как полноценные пути; честное сообщение вместо пустого экрана |
+| Ноутбук цеха выключен, а инструкция нужна | Смена стоит | Копия с `publishedCode` открывается офлайн; в диалоге публикации остаются автономный QR, `.ikguide.json` и HTML |
+| Публикация отдаёт телефону `localhost` | QR ведёт «в никуда» | `_public_base()` подменяет loopback на LAN-адрес, диалог блокирует QR без цехового адреса и объясняет почему |
 
 ---
 
-## 9. Чек-лист готовности этапа 1
+## 10. Чек-лист готовности этапа 1
 
 - [x] npm workspaces, единый strict-tsconfig, Vitest
 - [x] `@ikguide/schema`: Zod-схема, смысловая валидация, порог 0.95, IO, `moveStep`
@@ -472,7 +591,7 @@ YAML-парсер, CRLF у `.bat`). Компиляцию выполняют ра
 - [x] **Этап 3:** `services/cad-api`, IKEA-схемы из геометрии, 3D-просмотр, слияние ревизий
 - [ ] Нативные `.exe`/`.apk` — этап 4
 
-## 10. Чек-лист готовности этапа 2
+## 11. Чек-лист готовности этапа 2
 
 - [x] `services/vision-api`: FastAPI, OpenCV-пайплайн, PyMuPDF для вектора, RapidOCR для фото
 - [x] `/health`, `/v1/recognize` (до 6 файлов), `/v1/recognize/roi`, понятные русские ошибки 4xx
@@ -484,7 +603,7 @@ YAML-парсер, CRLF у `.bat`). Компиляцию выполняют ра
 - [x] 98 pytest, 18 тестов сборщика, UI-тесты сканирования и ROI, typecheck и production-сборка
 - [x] Офлайн-режим: демо и открытые инструкции работают без сервиса, диалог объясняет запуск
 
-## 11. Чек-лист готовности этапа 3
+## 12. Чек-лист готовности этапа 3
 
 - [x] `services/cad-api`: FastAPI на 8001, `/health`, `/v1/cad/import`, `/v1/cad/render-view`
 - [x] Загрузка `.step/.stp/.stl/.obj/.glb/.gltf`, нормализация единиц и масштаба, центрирование
@@ -502,7 +621,7 @@ YAML-парсер, CRLF у `.bat`). Компиляцию выполняют ра
 - [x] Офлайн: `.glb/.gltf` разбираются в браузере, `.step` просит `npm run dev:cad`
 - [x] 44 pytest, 14 тестов сборщика, +8 тестов схемы, UI-тесты 3D; `npm test`, `typecheck`, `build`
 
-## 12. Чек-лист готовности этапа 4
+## 13. Чек-лист готовности этапа 4
 
 - [x] `runtimeConfig.ts`: определение оболочки (`web` / `tauri-desktop` / `capacitor-android`), режим по умолчанию,
       адреса сервисов с сохранением, `sanitizeBaseUrl`, `joinUrl`, LAN-подсказка, чтение `?g=` и `?guide=`
@@ -528,3 +647,27 @@ YAML-парсер, CRLF у `.bat`). Компиляцию выполняют ра
 - [x] `npm run check:native` — 127 статических проверок нативной упаковки, 0 провалов
 - [x] `cargo check` вынесен в CI (джоба `rust-tauri-check`): Rust компилируется на каждом push, хотя локально `rustc` нет
 - [x] README: как скачать `.exe`/`.apk` через Actions/Release и как поднять цеховой сервер на Windows
+
+## 14. Чек-лист готовности этапа 5
+
+- [x] `POST /v1/guides`: полный `.ikguide.json` до 64 МБ, код из 8 символов без `0/o/1/l`, атомарная запись
+- [x] Дедупликация по SHA-256 (`deduplicated: true`), вытеснение после 200 публикаций по монотонному `seq`
+- [x] Защита имён: `^[a-z0-9]{6,12}$` + проверка родителей каталога; `../` и `abcdefgh.json` отсекаются
+- [x] Валидация документа с русскими ошибками `400/404/413/422`
+- [x] `GET /v1/guides` (список без тяжёлых тел) и `GET /v1/guides/{код}` (CORS `*`, кэш, регистр не важен)
+- [x] `GET /v1/network-info`: LAN/link-local/loopback честно различаются, `suggestedApiBase` для поля адреса
+- [x] `_public_base()` не отдаёт телефону `127.0.0.1` в `absoluteUrl`
+- [x] Студия раздаётся цеховым сервером: `/` и `/studio` из `apps/studio-web/dist`, `/assets`, `IKGUIDE_STUDIO_DIST`
+- [x] `publishedGuides.ts`: публикация, скачивание с проверкой схемы, список, `network-info`, сборка и разбор ссылки
+- [x] Диалог QR: вкладка «Опубликовать в цех» по умолчанию — код, размер, 3D, короткая ссылка, копирование,
+      список публикаций, блокировка QR без цехового адреса, откат на автономный QR при отказе сервера
+- [x] Бутстрап `?guideId=<код>&api=<адрес>`: адрес запоминается, документ скачивается и сохраняется офлайн
+- [x] Сканер понимает опубликованную ссылку; неизвестный код объясняется, а не молчит
+- [x] `publishedCode` в офлайн-библиотеке: та же ссылка открывает копию без сервера
+- [x] `services/vision-api/data/` в `.gitignore`, `IKGUIDE_GUIDES_DIR` для другого каталога
+- [x] Тесты: `test_guides.py` (30), `publishedGuides.test.ts` (18), `stage5.test.tsx` (6), `offlineStore` (+1) —
+      всего 267 тестов / 25 файлов и 129 pytest сервиса распознавания
+- [x] `npm test`, `npm run typecheck`, `npm run build`, `npm run test:vision`, `npm run test:cad`,
+      `npm run check:native` — зелёные
+- [x] Живая проверка: uvicorn + собранная студия — публикация, дедупликация, `/v1/guides/<код>`,
+      `/?guideId=…&api=…` отдаёт HTML, `/v1/network-info` без выдуманных адресов
