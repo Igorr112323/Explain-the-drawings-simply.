@@ -1,6 +1,6 @@
 [package]
 name = "ikguide-studio"
-version = "1.0.0"
+version = "1.2.0"
 description = "ИК-Гайд Инженер — чертёж в понятную инструкцию для цеха"
 authors = ["IkGuide"]
 edition = "2021"
