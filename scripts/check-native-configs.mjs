@@ -80,6 +80,13 @@ check('тема окна светлая', window.theme === 'Light', window.theme
 check('drag & drop файлов на окно включён', window.dragDropEnabled !== false);
 check('в конфиге нет упоминаний QR и мобильного приложения', !/QR|qr-код|apk/i.test(JSON.stringify(tauriConf)));
 
+const resources = JSON.stringify(tauriConf.bundle?.resources ?? []);
+check('установщик вшивает движок ресурсами (engine/*)', resources.includes('engine/*'), resources);
+check(
+  'в src-tauri/engine есть заглушка — glob ресурсов не пустой',
+  existsSync(join(tauriDir, 'src-tauri/engine/ПРОЧТИ-МЕНЯ.txt')),
+);
+
 const frontendDist = tauriConf.build?.frontendDist ?? '';
 const frontendResolved = resolve(tauriDir, 'src-tauri', frontendDist);
 check('frontendDist указывает на apps/studio-web/dist', frontendResolved === join(ROOT, 'apps/studio-web/dist'), frontendResolved);
@@ -187,13 +194,25 @@ check('release: Node 20', /NODE_VERSION:\s*'20'|node-version:\s*'20'/.test(relea
 check('release: rust-toolchain', releaseYaml.includes('dtolnay/rust-toolchain'));
 check('release: нет Android/.apk', !/apk|android|capacitor|gradle/i.test(releaseYaml));
 check('release: артефакт .exe', releaseYaml.includes('ikguide-studio-windows'));
-check('release: переносимый .exe без установки', releaseYaml.includes('IKGuide-Studio-Portable.exe'));
+check('release: лёгкий portable без движка (только артефакты)', releaseYaml.includes('IKGuide-Studio-Portable-lite.exe'));
 check(
   'release: Windows-джобы обходят имя репозитория с точкой на конце',
   (releaseYaml.match(/git clone[^\n]*ikguide/g) ?? []).length >= 2,
 );
 check('release: причина падения Tauri видна в аннотации', releaseYaml.includes('::error title=Сборка Tauri упала'));
-check('release: движок прикрепляется к Release архивом', releaseYaml.includes('ikguide-engine.zip'));
+check('release: движок упакован в архив для артефактов', releaseYaml.includes('ikguide-engine.zip'));
+check(
+  'release: .exe собирается после движка (движок вшивается в установщик)',
+  /build-windows-exe:[\s\S]{0,300}needs:\s*\[checks, build-engine-windows\]/.test(releaseYaml),
+);
+check(
+  'release: движок скачивается в src-tauri\\engine перед сборкой',
+  releaseYaml.includes('actions/download-artifact@v4') && /src-tauri\\engine/.test(releaseYaml),
+);
+check(
+  'release: в релиз уходит ровно один файл — установщик',
+  /files:\s*C:\\ikguide\\artifacts\\IKGuide-Studio-Setup\.exe/.test(releaseYaml),
+);
 check('release: установщик IKGuide-Studio-Setup.exe', releaseYaml.includes('IKGuide-Studio-Setup.exe'));
 check('release: движок PyInstaller отдельной джобой', /build-engine-windows/.test(releaseYaml) && releaseYaml.includes('pyinstaller'));
 check(

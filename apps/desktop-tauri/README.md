@@ -11,9 +11,11 @@ Tauri v2 оборачивает готовый веб-бандл `apps/studio-we
   рабочего стола, документов, загрузок и временной папки);
 * скрепка в нижней капсуле открывает проводник Windows с фильтром
   `jpg/png/webp/pdf/step/stp/stl/obj/glb/gltf` (`dialog:allow-open` + `fs:allow-read-file`);
-* если рядом с `.exe` лежит папка `engine` с `ikguide-vision.exe` и `ikguide-cad.exe`, приложение при
-  старте само поднимает оба сервиса в фоне — без окна консоли (`CREATE_NO_WINDOW`). Если файлов нет,
-  оно молча работает с уже запущенным сервером на 127.0.0.1:8000/8001;
+* движок (`ikguide-vision.exe`, `ikguide-cad.exe`) вшит в установщик ресурсами (`bundle.resources`),
+  поэтому человеку для работы нужен **ровно один файл** — `IKGuide-Studio-Setup.exe`;
+* при старте приложение само поднимает оба сервиса из папки `engine` рядом с `.exe` — без окна
+  консоли (`CREATE_NO_WINDOW`). Если файлов нет, оно молча работает с уже запущенным сервером
+  на 127.0.0.1:8000/8001;
 * если плагины недоступны (другая сборка, отменённый диалог), UI тихо откатывается к обычному
   скачиванию — пользователь всё равно получает файл;
 * диалога печати нет: продукт создаёт `.pdf`, а не print job.
@@ -42,9 +44,10 @@ GitHub Actions: workflow **Build Windows .exe** (`.github/workflows/release-buil
 
 | Артефакт | Что внутри |
 | --- | --- |
-| `ikguide-studio-windows` | `IKGuide-Studio-Setup.exe` (NSIS), `IKGuide-Studio-Portable.exe` (без установки), `IKGuide-Studio.msi` |
-| `ikguide-engine-windows` | `engine/ikguide-vision.exe`, `engine/ikguide-cad.exe` (PyInstaller, отдельная джоба — её падение не блокирует сборку UI) |
+| `ikguide-studio-windows` | `IKGuide-Studio-Setup.exe` (NSIS, всё внутри), `IKGuide-Studio.msi`, `IKGuide-Studio-Portable-lite.exe` (без движка) |
+| `ikguide-engine-windows` | `engine/ikguide-vision.exe`, `engine/ikguide-cad.exe` (PyInstaller) — они же вшиваются в установщик |
 | `ikguide-backend` | архив с Python-сервисами и `scripts/start-backend.bat` для случая «движок уже стоит отдельно» |
 
-Переносимый `.exe` требует установленного WebView2 — в Windows 10/11 он есть по умолчанию; установщик
-NSIS при необходимости подтягивает его сам.
+Установщик ставится в профиль пользователя (`currentUser`), права администратора не нужны. WebView2 в
+Windows 10/11 уже есть; NSIS при необходимости подтянет его сам. В релиз уходит один файл —
+`IKGuide-Studio-Setup.exe`.

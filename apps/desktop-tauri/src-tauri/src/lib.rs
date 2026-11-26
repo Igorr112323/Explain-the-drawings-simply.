@@ -23,13 +23,15 @@ static ENGINE_ONCE: Once = Once::new();
 /// Имена исполняемых файлов, которые может положить рядом установщик движка.
 const ENGINE_BINARIES: [&str; 2] = ["ikguide-vision.exe", "ikguide-cad.exe"];
 
-/// Где искать движок: `engine\` рядом с `.exe` и сам каталог `.exe` (portable-сборка).
+/// Где искать движок. В установщике он лежит ресурсами (`$INSTDIR\engine`), в переносимой
+/// сборке — рядом с `.exe`; на всякий случай проверяем и `resources\engine`.
 fn engine_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            roots.push(dir.join("engine"));
             roots.push(dir.to_path_buf());
+            roots.push(dir.join("engine"));
+            roots.push(dir.join("resources").join("engine"));
         }
     }
     roots

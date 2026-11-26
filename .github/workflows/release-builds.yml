@@ -66,8 +66,10 @@ jobs:
 
   # ---------------------------------------------------------------- Windows .exe
   build-windows-exe:
-    name: Windows .exe (установщик + portable)
-    needs: checks
+    name: Windows .exe (один файл со встроенным движком)
+    # Ставим после движка: его файлы вшиваются в установщик как ресурсы, чтобы человек скачал
+    # ровно один .exe и получил рабочий продукт.
+    needs: [checks, build-engine-windows]
     runs-on: windows-latest
     # Имя репозитория заканчивается точкой, а Windows не умеет папки с точкой на конце — поэтому
     # штатный checkout в $GITHUB_WORKSPACE падает. Клонируем в короткий путь и работаем в нём.
@@ -105,6 +107,16 @@ jobs:
       - name: Собрать пакеты и веб-бандл
         run: npm run build
 
+      - name: Скачать собранный движок в бандл
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: ikguide-engine-windows
+          path: C:\ikguide\apps\desktop-tauri\src-tauri\engine
+
+      - name: Показать, что попадёт в установщик
+        run: Get-ChildItem C:\ikguide\apps\desktop-tauri\src-tauri\engine | Select-Object Name, Length
+
       - name: Поставить Tauri CLI
         run: npm install --prefix apps/desktop-tauri --no-audit --no-fund
 
@@ -128,8 +140,9 @@ jobs:
       - name: Разложить артефакты
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          # Переносимый вариант: один .exe, без установки (WebView2 уже есть в Windows 10/11).
-          Copy-Item "apps/desktop-tauri/src-tauri/target/release/ikguide-studio.exe" "artifacts/IKGuide-Studio-Portable.exe"
+          # Лёгкий переносимый вариант (без встроенного движка): только для артефактов,
+          # в релиз уходит установщик со всем внутри.
+          Copy-Item "apps/desktop-tauri/src-tauri/target/release/ikguide-studio.exe" "artifacts/IKGuide-Studio-Portable-lite.exe"
           # Установщик: NSIS собирает «IKGuide Studio_<версия>_x64-setup.exe».
           $nsis = Get-ChildItem "apps/desktop-tauri/src-tauri/target/release/bundle/nsis/*.exe" | Select-Object -First 1
           if (-not $nsis) { throw "NSIS-установщик не собрался" }
@@ -147,12 +160,14 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Прикрепить к Release (только по тегу)
+      - name: Прикрепить единственный файл к Release (только по тегу)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: C:\ikguide\artifacts\*
-          fail_on_unmatched_files: false
+          # В релиз идёт ровно один установщик — всё остальное (движок, MSI, portable) лежит
+          # в артефактах запуска для тех, кому нужно.
+          files: C:\ikguide\artifacts\IKGuide-Studio-Setup.exe
+          fail_on_unmatched_files: true
 
   # -------------------------------------------- Локальный движок (два .exe, PyInstaller)
   build-engine-windows:
@@ -240,13 +255,6 @@ jobs:
           path: C:\ikguide\artifacts\engine\*
           if-no-files-found: warn
           retention-days: 30
-
-      - name: Прикрепить движок к Release (только по тегу)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: C:\ikguide\artifacts\ikguide-engine.zip
-          fail_on_unmatched_files: false
 
   # ------------------------------------------------- Локальный бэкенд (архив)
   build-portable-backend:

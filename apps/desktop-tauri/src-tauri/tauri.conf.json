@@ -43,7 +43,9 @@
       "icons/icon.ico",
       "icons/icon.icns"
     ],
-    "resources": [],
+    "resources": [
+      "engine/*"
+    ],
     "copyright": "© IkGuide",
     "category": "Productivity",
     "shortDescription": "Чертёж или 3D-модель → понятная PDF-инструкция",
