@@ -188,6 +188,11 @@ check('release: rust-toolchain', releaseYaml.includes('dtolnay/rust-toolchain'))
 check('release: нет Android/.apk', !/apk|android|capacitor|gradle/i.test(releaseYaml));
 check('release: артефакт .exe', releaseYaml.includes('ikguide-studio-windows'));
 check('release: переносимый .exe без установки', releaseYaml.includes('IKGuide-Studio-Portable.exe'));
+check(
+  'release: Windows-джобы обходят имя репозитория с точкой на конце',
+  (releaseYaml.match(/git clone[^\n]*C:\\\\ikguide/g) ?? []).length >= 2,
+);
+check('release: причина падения Tauri видна в аннотации', releaseYaml.includes('::error title=Сборка Tauri упала'));
 check('release: установщик IKGuide-Studio-Setup.exe', releaseYaml.includes('IKGuide-Studio-Setup.exe'));
 check('release: движок PyInstaller отдельной джобой', /build-engine-windows/.test(releaseYaml) && releaseYaml.includes('pyinstaller'));
 check(

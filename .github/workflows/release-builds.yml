@@ -89,7 +89,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: C:\ikguide\package-lock.json
+          # Глоб-движок setup-node понимает только прямые слэши.
+          cache-dependency-path: C:/ikguide/package-lock.json
 
       - name: Rust stable (MSVC)
         uses: dtolnay/rust-toolchain@stable
@@ -112,7 +113,16 @@ jobs:
         run: node scripts/check-native-configs.mjs
 
       - name: Собрать .exe (NSIS + MSI)
-        run: npm --prefix apps/desktop-tauri run build -- --bundles nsis,msi
+        # Вывод дублируется в аннотацию при падении: логи Actions в некоторых средах недоступны,
+        # а причина должна быть видна сразу в сводке запуска.
+        run: |
+          npm --prefix apps/desktop-tauri run build -- --bundles nsis,msi 2>&1 |
+            Tee-Object -FilePath C:\ikguide\tauri-build.log
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content C:\ikguide\tauri-build.log -Tail 20 | Out-String) -replace "`r?`n", ' | '
+            Write-Host "::error title=Сборка Tauri упала::$tail"
+            exit 1
+          }
         env:
           TAURI_SIGNING_PRIVATE_KEY: ''
 
@@ -177,24 +187,34 @@ jobs:
           python -m pip install pyinstaller
 
       - name: Собрать ikguide-vision.exe
-        working-directory: services/vision-api
-        run: >
-          python -m PyInstaller --noconfirm --onefile --name ikguide-vision
-          --paths . --collect-submodules app
-          --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto
-          --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto
-          --hidden-import uvicorn.lifespan.on
-          engine_entry.py
+        working-directory: C:\ikguide\services\vision-api
+        run: |
+          python -m PyInstaller --noconfirm --onefile --name ikguide-vision `
+            --paths . --collect-submodules app `
+            --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto `
+            --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto `
+            --hidden-import uvicorn.lifespan.on `
+            engine_entry.py 2>&1 | Tee-Object -FilePath C:\ikguide\ikguide-vision.log
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content C:\ikguide\ikguide-vision.log -Tail 20 | Out-String) -replace "`r?`n", ' | '
+            Write-Host "::error title=PyInstaller ikguide-vision упал::$tail"
+            exit 1
+          }
 
       - name: Собрать ikguide-cad.exe
-        working-directory: services/cad-api
-        run: >
-          python -m PyInstaller --noconfirm --onefile --name ikguide-cad
-          --paths . --collect-submodules app
-          --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto
-          --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto
-          --hidden-import uvicorn.lifespan.on
-          engine_entry.py
+        working-directory: C:\ikguide\services\cad-api
+        run: |
+          python -m PyInstaller --noconfirm --onefile --name ikguide-cad `
+            --paths . --collect-submodules app `
+            --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto `
+            --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto `
+            --hidden-import uvicorn.lifespan.on `
+            engine_entry.py 2>&1 | Tee-Object -FilePath C:\ikguide\ikguide-cad.log
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content C:\ikguide\ikguide-cad.log -Tail 20 | Out-String) -replace "`r?`n", ' | '
+            Write-Host "::error title=PyInstaller ikguide-cad упал::$tail"
+            exit 1
+          }
 
       - name: Сложить движок в папку engine
         run: |
