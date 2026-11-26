@@ -225,7 +225,7 @@ Tauri v2, вся логика WebView2/ярлыков/удаления сохр�
 ## 10. Ограничения
 
 * Rust в песочнице нет (`rustc`/`cargo` отсутствуют): `.exe` собирается на Windows/в CI
-  (workflow «Build Windows .exe»), здесь проверяются конфиги (`npm run check:native`, 144 проверки) и бандл.
+  (workflow «Build Windows .exe»), здесь проверяются конфиги (`npm run check:native`, 145 проверок) и бандл.
 * Упаковка движка через PyInstaller — отдельная джоба `continue-on-error: true`: даже если она
   споткнётся на новой зависимости, UI-установщик и portable `.exe` всё равно соберутся.
 * Вход — только 2D: `.jpg/.jpeg/.png/.webp/.pdf`. 3D-модели не принимаются ни в одной точке конвейера.

@@ -189,6 +189,11 @@ if (templateExists) {
   check('  сохранена проверка и установка WebView2', nsi.includes('!define WEBVIEW2APPGUID') && nsi.includes('Section WebView2'));
   check('  сохранены ярлыки и удаление', nsi.includes('CreateOrUpdateStartMenuShortcut') && /Section Uninstall/.test(nsi));
   check('  сохранена проверка запущенного приложения', nsi.includes('CheckIfAppIsRunning'));
+  // bundler компилирует .nsi как Handlebars: любой комментарий с {{...}} ломает сборку установщика.
+  check(
+    '  все {{...}} — валидные плейсхолдеры Handlebars',
+    !/\{\{(?!\s*[#/!^@A-Za-z_])/.test(nsi) && (nsi.match(/\{\{/g) ?? []).length === (nsi.match(/\}\}/g) ?? []).length,
+  );
   check('  сохранены переменные шаблонизатора Tauri', ['{{product_name}}', '{{version}}', '{{installer_icon}}', '{{sidebar_image}}', '{{header_image}}', '{{install_mode}}'].every((token) => nsi.includes(token)));
   check('  движок устанавливается вместе с приложением (resources)', !nsi.includes('cad-api'));
   // Структурный баланс блоков: самый частый способ сломать .nsi — незакрытый блок,
