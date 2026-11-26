@@ -69,24 +69,35 @@ jobs:
     name: Windows .exe (установщик + portable)
     needs: checks
     runs-on: windows-latest
+    # Имя репозитория заканчивается точкой, а Windows не умеет папки с точкой на конце — поэтому
+    # штатный checkout в $GITHUB_WORKSPACE падает. Клонируем в короткий путь и работаем в нём.
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: C:\ikguide
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout в короткий путь
+        shell: pwsh
+        working-directory: C:\
+        run: |
+          git clone --quiet "https://github.com/${{ github.repository }}.git" C:\ikguide
+          git -C C:\ikguide checkout --quiet "${{ github.sha }}"
+          git -C C:\ikguide log --oneline -1
 
       - name: Node 20
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          cache-dependency-path: C:\ikguide\package-lock.json
 
       - name: Rust stable (MSVC)
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Кэш cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desktop-tauri/src-tauri -> target
+      # Кэш cargo намеренно не используется: он ожидает checkout в $GITHUB_WORKSPACE, а здесь
+      # рабочая папка — C:\ikguide. Надёжность сборки важнее пары минут компиляции.
 
       - name: Зависимости веб-части
         run: npm ci
@@ -106,7 +117,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ''
 
       - name: Разложить артефакты
-        shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
           # Переносимый вариант: один .exe, без установки (WebView2 уже есть в Windows 10/11).
@@ -124,7 +134,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ikguide-studio-windows
-          path: artifacts/*
+          path: C:\ikguide\artifacts\*
           if-no-files-found: error
           retention-days: 30
 
@@ -132,7 +142,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*
+          files: C:\ikguide\artifacts\*
           fail_on_unmatched_files: false
 
   # -------------------------------------------- Локальный движок (два .exe, PyInstaller)
@@ -141,8 +151,18 @@ jobs:
     runs-on: windows-latest
     # Тяжёлая и капризная упаковка не должна блокировать выпуск UI-сборки.
     continue-on-error: true
+    # Та же причина, что и у .exe: короткий путь вместо $GITHUB_WORKSPACE с точкой на конце.
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: C:\ikguide
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout в короткий путь
+        shell: pwsh
+        working-directory: C:\
+        run: |
+          git clone --quiet "https://github.com/${{ github.repository }}.git" C:\ikguide
+          git -C C:\ikguide checkout --quiet "${{ github.sha }}"
 
       - name: Python 3.11
         uses: actions/setup-python@v5
@@ -177,7 +197,6 @@ jobs:
           engine_entry.py
 
       - name: Сложить движок в папку engine
-        shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts/engine | Out-Null
           Copy-Item services/vision-api/dist/ikguide-vision.exe artifacts/engine/
@@ -195,7 +214,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ikguide-engine-windows
-          path: artifacts/engine/*
+          path: C:\ikguide\artifacts\engine\*
           if-no-files-found: warn
           retention-days: 30
 
