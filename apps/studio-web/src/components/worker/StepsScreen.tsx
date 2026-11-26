@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { pluralRu } from '@ikguide/gost-translator';
 import { getEffectiveAnnotationValue, type GuideStep } from '@ikguide/schema';
 import { useStudio } from '../../state/studio';
@@ -6,6 +6,15 @@ import { WorkerHeader, UncertaintyBanner } from './WorkerChrome';
 import { HighlightLegend, StepArt } from '../common/StepArt';
 import { SpeakerGlyph, WarnGlyph } from '../common/Glyphs';
 import { isSpeechSupported, speakRussian, stopSpeech } from '../../lib/speech';
+import { sanitizeSvgMarkup } from '../../lib/ikeaSvg';
+
+/**
+ * three.js is heavy, and most steps are IKEA sheets: the 3D view is loaded only when the worker
+ * actually taps «3D-модель».
+ */
+const Assembly3DViewer = lazy(() =>
+  import('../common/Assembly3DViewer').then((module) => ({ default: module.Assembly3DViewer })),
+);
 
 function buildSpeechText(step: GuideStep): string {
   const parts = [`Шаг ${step.number}. ${step.title}.`, step.workerText];
@@ -97,6 +106,10 @@ export function StepsScreen() {
   };
 
   const relatedAnnotations = doc.xrayAnnotations.filter((annotation) => step.drawingRefs.includes(annotation.id));
+  const assembly = doc.assembly3d ?? null;
+  const has3d = Boolean(assembly && (step.activePartIds ?? []).length > 0);
+  const show3d = has3d && state.viewMode === '3d';
+  const ikeaSvg = sanitizeSvgMarkup(step.svgDiagram);
 
   return (
     <div className="screen screen-steps">
@@ -136,6 +149,10 @@ export function StepsScreen() {
           }
           const dx = event.clientX - start.x;
           const dy = event.clientY - start.y;
+          // In 3D mode the same gesture orbits the model, so swipes must not change steps.
+          if (state.viewMode === '3d') {
+            return;
+          }
           if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
             if (dx < 0) {
               goNext();
@@ -145,9 +162,51 @@ export function StepsScreen() {
           }
         }}
       >
-        <div className="art-card">
-          <StepArt illustration={step.illustration} />
-        </div>
+        {has3d ? (
+          <div className="view-toggle" role="group" aria-label="Как показать шаг">
+            <button
+              type="button"
+              className={`view-toggle-button ${state.viewMode === '2d' ? 'is-active' : ''}`}
+              aria-pressed={state.viewMode === '2d'}
+              onClick={() => dispatch({ type: 'SET_VIEW_MODE', mode: '2d' })}
+            >
+              Схема IKEA
+            </button>
+            <button
+              type="button"
+              className={`view-toggle-button ${state.viewMode === '3d' ? 'is-active' : ''}`}
+              aria-pressed={state.viewMode === '3d'}
+              onClick={() => dispatch({ type: 'SET_VIEW_MODE', mode: '3d' })}
+            >
+              3D-модель
+            </button>
+          </div>
+        ) : null}
+
+        {show3d && assembly ? (
+          <Suspense fallback={<p className="muted small viewer-3d-loading">Загружаю 3D-просмотр…</p>}>
+            <Assembly3DViewer
+              glbDataUrl={assembly.glbDataUrl ?? assembly.glbUrl ?? null}
+              parts={assembly.parts}
+              activePartIds={step.activePartIds ?? []}
+              installedPartIds={step.installedPartIds ?? []}
+              theme={state.theme}
+              caption={step.title}
+              onError={(message) => dispatch({ type: 'SHOW_TOAST', tone: 'danger', text: message })}
+            />
+          </Suspense>
+        ) : ikeaSvg ? (
+          <div
+            className="art-card ikea-sheet"
+            role="img"
+            aria-label={`Схема шага: ${step.title}`}
+            dangerouslySetInnerHTML={{ __html: ikeaSvg }}
+          />
+        ) : (
+          <div className="art-card">
+            <StepArt illustration={step.illustration} />
+          </div>
+        )}
 
         <h2 className="step-title">{step.title}</h2>
         <p className="step-text">{step.workerText}</p>

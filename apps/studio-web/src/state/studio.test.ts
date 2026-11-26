@@ -17,6 +17,7 @@ function baseState(overrides: Partial<StudioState> = {}): StudioState {
     toast: null,
     focusedAnnotationId: null,
     manualNotation: '',
+    viewMode: '2d',
     scan: { open: false, mode: 'files', files: [] },
     vision: null,
     ...overrides,
@@ -209,6 +210,28 @@ describe('studio reducer', () => {
     const state = baseState();
     expect(studioReducer(state, { type: 'ADD_MANUAL_NOTATION', value: 'М8' })).toBe(state);
     expect(studioReducer(state, { type: 'ADD_VISION_CANDIDATES', candidates: [candidate('c9', 'М8')] })).toBe(state);
+  });
+
+  it('switches the step stage between the IKEA sheet and the 3D model', () => {
+    const state = baseState();
+    const three = studioReducer(state, { type: 'SET_VIEW_MODE', mode: '3d' });
+    expect(three.viewMode).toBe('3d');
+
+    const back = studioReducer(three, { type: 'SET_VIEW_MODE', mode: '2d' });
+    expect(back.viewMode).toBe('2d');
+
+    // Choosing another instruction always starts from the printable IKEA sheet.
+    const switched = studioReducer(three, { type: 'SELECT_DOC', docId: DEMO_DOCUMENTS[1]!.id });
+    expect(switched.viewMode).toBe('2d');
+  });
+
+  it('ships the 3D demo as a selectable instruction', () => {
+    const ids = DEMO_DOCUMENTS.map((doc) => doc.id);
+    expect(ids).toContain('demo-up08-3d');
+    const state = studioReducer(baseState(), { type: 'SELECT_DOC', docId: 'demo-up08-3d' });
+    const doc = state.docs.find((item) => item.id === 'demo-up08-3d');
+    expect(doc?.assembly3d?.parts).toHaveLength(12);
+    expect(doc?.steps.every((step) => step.svgDiagram?.startsWith('<svg'))).toBe(true);
   });
 
   it('clears the recognised sheet and its preview image', () => {

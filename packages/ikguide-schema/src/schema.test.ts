@@ -215,4 +215,140 @@ describe('document io and step utilities', () => {
     expect(step.estimatedMinutes).toBe(3);
     expect(step.illustration.highlight).toEqual([]);
   });
+
+  describe('assembly3d (stage 3)', () => {
+    function withAssembly(doc: IkGuideDocument): IkGuideDocument {
+      return {
+        ...doc,
+        assembly3d: {
+          glbDataUrl: 'data:model/gltf-binary;base64,Z2xURg==',
+          sourceFormat: 'glb',
+          units: 'mm',
+          sizeMm: { x: 120, y: 68, z: 80 },
+          generator: 'ikguide-cad-api 1.0.0',
+          parts: [
+            {
+              id: 'part-1',
+              nodeName: 'korpus',
+              displayName: 'Корпус',
+              role: 'base',
+              stepNumber: 1,
+              explosionVector: [0, 1, 0],
+              volumeMm3: 204000,
+            },
+            {
+              id: 'part-2',
+              nodeName: 'kryshka',
+              displayName: 'Крышка',
+              role: 'part',
+              stepNumber: 2,
+              explosionVector: [0, 1, 0],
+            },
+          ],
+        },
+        steps: doc.steps.map((step, index) => ({
+          ...step,
+          activePartIds: index === 0 ? ['part-1'] : ['part-2'],
+          installedPartIds: index === 0 ? [] : ['part-1'],
+          cameraView: { azimuth: -30, elevation: 30 },
+          svgDiagram: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#E8F2FF" stroke="#007AFF"/></svg>`,
+        })),
+      };
+    }
+
+    it('keeps old 2D documents valid without the block', () => {
+      const doc = makeDocument();
+      expect(doc.assembly3d).toBeUndefined();
+      expect(ikGuideDocumentSchema.safeParse(doc).success).toBe(true);
+    });
+
+    it('accepts a 3D assembly with step-level diagrams', () => {
+      const result = ikGuideDocumentSchema.safeParse(withAssembly(makeDocument()));
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.assembly3d?.parts).toHaveLength(2);
+        expect(result.data.steps[1]?.svgDiagram).toContain('<svg');
+        expect(result.data.steps[0]?.cameraView?.elevation).toBe(30);
+      }
+    });
+
+    it('requires a GLB payload', () => {
+      const doc = withAssembly(makeDocument());
+      const broken = { ...doc, assembly3d: { ...doc.assembly3d!, glbDataUrl: undefined } };
+      const result = ikGuideDocumentSchema.safeParse(broken);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((issue) => issue.message.includes('GLB'))).toBe(true);
+      }
+    });
+
+    it('rejects parts pointing at a missing step', () => {
+      const doc = withAssembly(makeDocument());
+      const broken = {
+        ...doc,
+        assembly3d: {
+          ...doc.assembly3d!,
+          parts: doc.assembly3d!.parts.map((part) => ({ ...part, stepNumber: 9 })),
+        },
+      };
+      const result = ikGuideDocumentSchema.safeParse(broken);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((issue) => issue.message.includes('несуществующий шаг'))).toBe(true);
+      }
+    });
+
+    it('rejects steps referencing unknown parts', () => {
+      const doc = withAssembly(makeDocument());
+      const broken = {
+        ...doc,
+        steps: doc.steps.map((step, index) => ({
+          ...step,
+          activePartIds: index === 0 ? ['part-404'] : step.activePartIds,
+        })),
+      };
+      const result = ikGuideDocumentSchema.safeParse(broken);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((issue) => issue.message.includes('несуществующую 3D-деталь'))).toBe(true);
+      }
+    });
+
+    it('rejects a part pinned to two steps at once', () => {
+      const doc = withAssembly(makeDocument());
+      const broken = {
+        ...doc,
+        steps: doc.steps.map((step, index) => ({
+          ...step,
+          activePartIds: index === 0 ? ['part-1'] : ['part-1'],
+        })),
+      };
+      const result = ikGuideDocumentSchema.safeParse(broken);
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects a diagram that is not an SVG', () => {
+      const doc = withAssembly(makeDocument());
+      const broken = {
+        ...doc,
+        steps: doc.steps.map((step) => ({ ...step, svgDiagram: 'data:image/png;base64,AAAA' })),
+      };
+      const result = ikGuideDocumentSchema.safeParse(broken);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((issue) => issue.message.includes('SVG'))).toBe(true);
+      }
+    });
+
+    it('rejects duplicate part ids', () => {
+      const doc = withAssembly(makeDocument());
+      const parts = doc.assembly3d!.parts;
+      const broken = { ...doc, assembly3d: { ...doc.assembly3d!, parts: [parts[0]!, parts[0]!] } };
+      const result = ikGuideDocumentSchema.safeParse(broken);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((issue) => issue.message.includes('Повторяющийся идентификатор детали'))).toBe(true);
+      }
+    });
+  });
 });

@@ -55,6 +55,7 @@ describe('studio smoke test', () => {
     expect(text).toContain('Мои инструкции');
     expect(text).toContain('Кронштейн крепления сервопривода КС-04');
     expect(text).toContain('Корпус редуктора РД-12 (сборка)');
+    expect(text).toContain('Узел привода УП-08');
     expect(text).toContain('Сфоткать');
     expect(text).toContain('Проверка размеров');
     expect(element.querySelectorAll('.pin').length).toBe(0);
@@ -127,6 +128,40 @@ describe('studio smoke test', () => {
 
     clickByText('Глазами рабочего');
     expect(container.textContent).toContain('Перед началом работы');
+  });
+
+  it('opens the 3D demo and switches between the IKEA sheet and the 3D model', async () => {
+    renderApp();
+    const open = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent?.trim() === 'Открыть',
+    );
+    expect(open).not.toBeNull();
+
+    // Third demo card is the 3D assembly.
+    act(() => {
+      const cards = Array.from(container.querySelectorAll('.doc-card'));
+      const card3d = cards.find((card) => card.textContent?.includes('Узел привода УП-08'));
+      expect(card3d).toBeDefined();
+      card3d?.querySelector<HTMLButtonElement>('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain('Спецификация 3D-сборки');
+    expect(container.textContent).toContain('Болт М6x20');
+    clickByText('Начать по шагам');
+
+    expect(container.querySelector('.ikea-sheet svg')).not.toBeNull();
+    clickByText('3D-модель');
+    // The 3D viewer is code-split, so the chunk resolves on a later tick. jsdom has no WebGL, so the
+    // viewer must degrade to a readable hint instead of crashing.
+    for (let tick = 0; tick < 8; tick += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    expect(container.querySelector('.viewer-3d-frame')).not.toBeNull();
+    expect(container.textContent).toContain('Схема IKEA остаётся доступной');
+    clickByText('Схема IKEA');
+    expect(container.querySelector('.ikea-sheet svg')).not.toBeNull();
   });
 
   it('completes the qc checklist and reaches the done screen', () => {

@@ -122,6 +122,55 @@ export const antiErrorSchema = z.object({
   severity: z.enum(['warning', 'critical']),
 });
 
+/* ---------------------------------------------------------------- 3D assembly (stage 3) */
+
+export const assemblyRoleSchema = z.enum(['base', 'part', 'fastener']);
+
+export const vector3Schema = z.tuple([z.number(), z.number(), z.number()]);
+
+export const cameraViewSchema = z.object({
+  azimuth: z.number().min(-360).max(360),
+  elevation: z.number().min(-89).max(89),
+});
+
+/** One node of the imported CAD assembly; `nodeName` matches the GLB node name. */
+export const assemblyPartSchema = z.object({
+  id: z.string().min(1),
+  nodeName: z.string().min(1),
+  displayName: z.string().min(1),
+  role: assemblyRoleSchema,
+  stepNumber: z.number().int().positive(),
+  explosionVector: vector3Schema,
+  volumeMm3: z.number().nonnegative().optional(),
+  bboxMm: z
+    .object({ x: z.number().positive(), y: z.number().positive(), z: z.number().positive() })
+    .optional(),
+  /** Bounding-box centre, stored so the studio can re-render an IKEA diagram offline. */
+  centerMm: z
+    .object({ x: z.number(), y: z.number(), z: z.number() })
+    .optional(),
+  notation: z.string().min(1).optional(),
+});
+
+const assembly3dObjectSchema = z.object({
+  glbDataUrl: z.string().min(1).optional(),
+  glbUrl: z.string().min(1).optional(),
+  sourceFormat: z.enum(['step', 'stp', 'stl', 'obj', 'glb', 'gltf']),
+  units: z.literal('mm').default('mm'),
+  sizeMm: z.object({ x: z.number().positive(), y: z.number().positive(), z: z.number().positive() }),
+  massKg: z.number().positive().optional(),
+  sessionId: z.string().min(1).optional(),
+  generator: z.string().min(1).optional(),
+  revision: z.string().min(1).optional(),
+  parts: z.array(assemblyPartSchema).min(1, 'Каталог деталей не может быть пустым'),
+});
+
+/** Optional 3D block: old 2D documents stay valid without it. */
+export const assembly3dSchema = assembly3dObjectSchema.refine(
+  (value) => Boolean(value.glbDataUrl) || Boolean(value.glbUrl),
+  { message: 'Нужна ссылка на GLB: glbDataUrl или glbUrl', path: ['glbDataUrl'] },
+);
+
 export const stepSchema = z.object({
   id: z.string().min(1),
   number: z.number().int().positive(),
@@ -132,6 +181,17 @@ export const stepSchema = z.object({
   antiError: antiErrorSchema.nullable().default(null),
   criticalChecks: z.array(criticalCheckSchema).default([]),
   drawingRefs: z.array(z.string()).default([]),
+  /** 3D parts that fly in on this step (stage 3). */
+  activePartIds: z.array(z.string()).optional(),
+  /** 3D parts already in place before this step. */
+  installedPartIds: z.array(z.string()).optional(),
+  cameraView: cameraViewSchema.optional(),
+  /** IKEA-2.0 vector diagram of this step; goes to the A4 print as well. */
+  svgDiagram: z
+    .string()
+    .min(1)
+    .refine((value) => value.trimStart().startsWith('<svg'), 'Диаграмма должна быть SVG-разметкой')
+    .optional(),
 });
 
 export const xrayAnnotationSchema = z.object({
@@ -171,6 +231,7 @@ export const ikGuideDocumentSchema = z
     steps: z.array(stepSchema).min(1, 'Инструкция должна содержать хотя бы один шаг'),
     xrayAnnotations: z.array(xrayAnnotationSchema),
     qcChecklist: z.array(qcItemSchema).min(1, 'Чек-лист не может быть пустым'),
+    assembly3d: assembly3dSchema.optional(),
   })
   .superRefine((doc, ctx) => {
     const annotationIds = new Set<string>();
@@ -231,6 +292,67 @@ export const ikGuideDocumentSchema = z
       qcIds.add(item.id);
     });
 
+    if (doc.assembly3d) {
+      const partIds = new Set<string>();
+      doc.assembly3d.parts.forEach((part, index) => {
+        if (partIds.has(part.id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['assembly3d', 'parts', index, 'id'],
+            message: `Повторяющийся идентификатор детали: ${part.id}`,
+          });
+        }
+        partIds.add(part.id);
+        if (part.stepNumber > doc.steps.length) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['assembly3d', 'parts', index, 'stepNumber'],
+            message: `Деталь «${part.displayName}» ссылается на несуществующий шаг №${part.stepNumber}`,
+          });
+        }
+      });
+
+      doc.steps.forEach((step, stepIndex) => {
+        const active = step.activePartIds ?? [];
+        const installed = step.installedPartIds ?? [];
+        active.forEach((partId, refIndex) => {
+          if (!partIds.has(partId)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['steps', stepIndex, 'activePartIds', refIndex],
+              message: `Шаг ссылается на несуществующую 3D-деталь «${partId}»`,
+            });
+          }
+        });
+        installed.forEach((partId, refIndex) => {
+          if (!partIds.has(partId)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['steps', stepIndex, 'installedPartIds', refIndex],
+              message: `Шаг ссылается на несуществующую 3D-деталь «${partId}»`,
+            });
+          }
+        });
+        active.forEach((partId) => {
+          if (installed.includes(partId)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['steps', stepIndex, 'activePartIds'],
+              message: `Деталь «${partId}» не может быть установленной и активной одновременно`,
+            });
+          }
+          const part = doc.assembly3d?.parts.find((item) => item.id === partId);
+          if (part && part.stepNumber !== step.number) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['steps', stepIndex, 'activePartIds'],
+              message: `Деталь «${part.displayName}» закреплена за шагом №${part.stepNumber}, а не №${step.number}`,
+            });
+          }
+        });
+      });
+    }
+
     const stepIds = new Set<string>();
     doc.steps.forEach((step, index) => {
       if (stepIds.has(step.id)) {
@@ -262,3 +384,7 @@ export type Difficulty = z.infer<typeof difficultySchema>;
 export type BomIcon = z.infer<typeof bomIconSchema>;
 export type AnnotationKind = z.infer<typeof annotationKindSchema>;
 export type HighlightTone = z.infer<typeof highlightToneSchema>;
+export type AssemblyRole = z.infer<typeof assemblyRoleSchema>;
+export type AssemblyPart = z.infer<typeof assemblyPartSchema>;
+export type Assembly3d = z.infer<typeof assembly3dSchema>;
+export type CameraView = z.infer<typeof cameraViewSchema>;

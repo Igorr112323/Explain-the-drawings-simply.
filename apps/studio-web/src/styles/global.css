@@ -3367,3 +3367,276 @@ code {
     flex-direction: column;
   }
 }
+
+/* ── Stage 3: 3D assembly ─────────────────────────────────────────────────────────────────────── */
+
+/* IKEA sheet rendered by cad-api (or by the offline TS renderer) inside the step stage. */
+.ikea-sheet {
+  padding: 6px;
+  overflow: hidden;
+}
+
+.ikea-sheet svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.view-toggle {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 4px;
+  gap: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.view-toggle-button {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 16px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.view-toggle-button.is-active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(17, 19, 24, 0.14);
+}
+
+/* three.js canvas and its controls. */
+.viewer-3d {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.viewer-3d-frame {
+  position: relative;
+  height: 340px;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  overflow: hidden;
+  cursor: grab;
+  box-shadow: var(--shadow-card);
+}
+
+.viewer-3d-compact .viewer-3d-frame {
+  height: 240px;
+}
+
+.viewer-3d-frame:active {
+  cursor: grabbing;
+}
+
+.viewer-3d-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+}
+
+.viewer-3d-hint {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  margin: 0;
+}
+
+.viewer-3d-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.viewer-3d-slider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.viewer-3d-slider span {
+  min-width: 72px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.viewer-3d-slider input[type='range'] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.viewer-3d-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.viewer-3d-caption {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+  text-align: center;
+}
+
+/* Prep screen: full fastener/part specification of the 3D assembly. */
+.spec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.spec-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 13px;
+}
+
+.spec-name {
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spec-fastener .spec-name::before {
+  content: '⚙ ';
+  color: var(--ink-3);
+}
+
+.spec-size,
+.spec-step {
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.spec-qty {
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Engineer card for the CAD pipeline. */
+.cad-card {
+  width: 460px;
+}
+
+.cad-health {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.cad-health.is-online {
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.cad-health.is-offline {
+  color: var(--ink-3);
+  background: var(--surface-3);
+}
+
+.cad-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.cad-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cad-view-params {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.cad-view-params label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cad-view-params select,
+.cad-view-params input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.cad-footnote {
+  margin: 0;
+  padding: 0 12px 12px;
+}
+
+/* A4 sheet: the vector IKEA diagram scales to the column width, never rasterised. */
+.print-art-svg svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Engineer canvas: IKEA diagram preview and 3D regrouping buttons on a step card. */
+.canvas-art-svg svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.canvas-3d-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+
+.canvas-3d-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.canvas-3d-actions .chip-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

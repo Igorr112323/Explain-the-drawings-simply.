@@ -8,6 +8,7 @@ import {
 import { useStudio } from '../../state/studio';
 import { readTextFile, downloadText, sanitizeFileName } from '../../lib/download';
 import { BomCanvasCard, StepCanvasCard, SummaryCard, ToolsCanvasCard, type CanvasPosition } from './EngineerCards';
+import { CadCanvasCard } from './CadCanvasCard';
 import { EngineerToolbar } from './EngineerToolbar';
 import { QrDialog } from '../common/QrDialog';
 
@@ -231,6 +232,7 @@ export function EngineerCanvas() {
           <SummaryCard position={{ x: 24, y: 40 }} />
           <BomCanvasCard position={{ x: 24, y: 470 }} />
           <ToolsCanvasCard position={{ x: 24, y: 880 }} />
+          <CadCanvasCard position={{ x: 24, y: 1290 }} />
 
           {doc.steps.map((step, index) => (
             <StepCanvasCard

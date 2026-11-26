@@ -19,8 +19,12 @@
     "build": "npm run build:packages && npm run build -w @ikguide/studio-web",
     "build:packages": "npm run build -w @ikguide/schema -w @ikguide/gost-translator -w @ikguide/builder",
     "dev:vision": "bash services/vision-api/run.sh dev",
+    "dev:cad": "bash services/cad-api/run.sh dev",
+    "dev:all": "bash scripts/dev-all.sh",
     "install:vision": "bash services/vision-api/run.sh install",
-    "test:vision": "bash services/vision-api/run.sh test"
+    "install:cad": "bash services/cad-api/run.sh install",
+    "test:vision": "bash services/vision-api/run.sh test",
+    "test:cad": "bash services/cad-api/run.sh test"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",

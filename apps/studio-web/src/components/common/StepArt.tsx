@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import type { Highlight, StepIllustration } from '@ikguide/schema';
 import { isKnownIllustration, type IllustrationId } from '../../art/ids';
-import { GenericStepArt, type ArtProps } from '../../art/kit';
+import { CadAssemblyArt, GenericStepArt, type ArtProps } from '../../art/kit';
 import {
   BracketBoreArt,
   BracketChamferArt,
@@ -35,6 +35,7 @@ const ART_REGISTRY: Readonly<Record<IllustrationId, ArtComponent>> = {
   'gearbox-torque': GearboxTorqueArt,
   'gearbox-check': GearboxCheckArt,
   'generic-step': GenericStepArt,
+  'cad-assembly': CadAssemblyArt,
 };
 
 export function StepArt({ illustration, compact = false }: { illustration: StepIllustration; compact?: boolean }) {

@@ -1,5 +1,6 @@
 import { useStudio } from '../../state/studio';
 import { StepArt } from '../common/StepArt';
+import { sanitizeSvgMarkup } from '../../lib/ikeaSvg';
 
 export function PrintSheet() {
   const { doc, stats } = useStudio();
@@ -107,7 +108,15 @@ export function PrintSheet() {
 
           <h2>{step.title}</h2>
           <div className="print-art">
-            <StepArt illustration={step.illustration} />
+            {sanitizeSvgMarkup(step.svgDiagram) ? (
+              // The very same IKEA diagram the worker sees, projected from the 3D assembly.
+              <div
+                className="print-art-svg"
+                dangerouslySetInnerHTML={{ __html: sanitizeSvgMarkup(step.svgDiagram) }}
+              />
+            ) : (
+              <StepArt illustration={step.illustration} />
+            )}
           </div>
           <p className="print-text">{step.workerText}</p>
 

@@ -4,6 +4,8 @@ import { moveStep, type IkGuideDocument, type GuideStep } from '@ikguide/schema'
 import { useStudio } from '../../state/studio';
 import { StepArt } from '../common/StepArt';
 import { BomGlyph, ToolGlyph } from '../common/Glyphs';
+import { sanitizeSvgMarkup } from '../../lib/ikeaSvg';
+import { canMergeWithPrevious, canSplitStep, mergeStepWithPrevious, splitPartToStep } from '../../lib/steps3d';
 
 export interface CanvasPosition {
   x: number;
@@ -21,7 +23,7 @@ interface StepCanvasCardProps {
 }
 
 export function StepCanvasCard({ step, index, position, total, isFocused, onDragStart, onFocus }: StepCanvasCardProps) {
-  const { dispatch } = useStudio();
+  const { doc, dispatch } = useStudio();
   const [antiDraft, setAntiDraft] = useState('');
   const [editingAnti, setEditingAnti] = useState(false);
   const [severity, setSeverity] = useState<'warning' | 'critical'>('warning');
@@ -101,8 +103,49 @@ export function StepCanvasCard({ step, index, position, total, isFocused, onDrag
         </label>
 
         <div className="canvas-art">
-          <StepArt illustration={step.illustration} compact />
+          {sanitizeSvgMarkup(step.svgDiagram) ? (
+            <div
+              className="canvas-art-svg"
+              dangerouslySetInnerHTML={{ __html: sanitizeSvgMarkup(step.svgDiagram) }}
+            />
+          ) : (
+            <StepArt illustration={step.illustration} compact />
+          )}
         </div>
+
+        {(step.activePartIds ?? []).length > 0 && doc.assembly3d ? (
+          <div className="canvas-3d-row">
+            <span className="field-label">
+              3D: {(step.activePartIds ?? []).length} дет. ·{' '}
+              {step.cameraView ? `${Math.round(step.cameraView.azimuth)}° / ${Math.round(step.cameraView.elevation)}°` : 'без ракурса'}
+            </span>
+            <div className="canvas-3d-actions">
+              <button
+                type="button"
+                className="chip-button"
+                disabled={!canMergeWithPrevious(doc, step.id)}
+                onClick={() => patch((current) => mergeStepWithPrevious(current, step.id))}
+                title="Перенести детали этого шага в предыдущий шаг"
+              >
+                ⤴ Влить в предыдущий
+              </button>
+              <button
+                type="button"
+                className="chip-button"
+                disabled={!canSplitStep(doc, step.id)}
+                onClick={() => {
+                  const partId = [...(step.activePartIds ?? [])].pop();
+                  if (partId) {
+                    patch((current) => splitPartToStep(current, step.id, partId));
+                  }
+                }}
+                title="Вынести последнюю деталь шага в отдельный шаг"
+              >
+                ⤵ Отделить деталь
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {step.criticalChecks.length > 0 ? (
           <div className="canvas-checks">

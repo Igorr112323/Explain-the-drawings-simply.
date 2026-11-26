@@ -22,6 +22,8 @@ import type { VisionCandidate, VisionSession } from '../lib/vision';
 export type StudioMode = 'worker' | 'engineer';
 export type WorkerScreen = 'home' | 'verify' | 'prep' | 'steps' | 'xray' | 'qc' | 'done';
 export type Theme = 'light' | 'dark';
+/** «Схема IKEA» (SVG) or «3D-модель» (WebGL) — the worker can switch on every step. */
+export type ViewMode = '2d' | '3d';
 
 export interface ToastMessage {
   id: number;
@@ -47,6 +49,8 @@ export interface StudioState {
   toast: ToastMessage | null;
   focusedAnnotationId: string | null;
   manualNotation: string;
+  /** Chosen presentation of the step stage; ignored by documents without a 3D assembly. */
+  viewMode: ViewMode;
   scan: ScanRequest;
   /** Recognition session does not survive a reload on purpose: the sheet images are large. */
   vision: VisionSession | null;
@@ -68,6 +72,7 @@ export type StudioAction =
   | { type: 'CLEAR_TOAST' }
   | { type: 'FOCUS_ANNOTATION'; annotationId: string | null }
   | { type: 'SET_MANUAL_NOTATION'; value: string }
+  | { type: 'SET_VIEW_MODE'; mode: ViewMode }
   | { type: 'OPEN_SCAN'; mode: 'files' | 'camera'; files?: File[] }
   | { type: 'CLOSE_SCAN' }
   | { type: 'SET_VISION_SESSION'; session: VisionSession; image: string | null }
@@ -109,6 +114,7 @@ function initialState(): StudioState {
     toast: null,
     focusedAnnotationId: null,
     manualNotation: '',
+    viewMode: '2d',
     scan: { open: false, mode: 'files', files: [] },
     vision: null,
   };
@@ -175,6 +181,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ...state,
         activeDocId: action.docId,
         stepIndex: 0,
+        viewMode: '2d',
         screen: state.mode === 'worker' ? 'home' : state.screen,
         focusedAnnotationId: null,
       };
@@ -211,6 +218,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, focusedAnnotationId: action.annotationId };
     case 'SET_MANUAL_NOTATION':
       return { ...state, manualNotation: action.value };
+    case 'SET_VIEW_MODE':
+      return { ...state, viewMode: action.mode };
     case 'OPEN_SCAN':
       return {
         ...state,

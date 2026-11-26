@@ -5,9 +5,9 @@ import { DEMO_DOCUMENTS, bracketDocument, gearboxDocument } from './demos';
 import { isKnownIllustration } from '../art/ids';
 
 describe('built-in demo projects', () => {
-  it('contains two valid and different projects', () => {
-    expect(DEMO_DOCUMENTS).toHaveLength(2);
-    expect(new Set(DEMO_DOCUMENTS.map((doc) => doc.id)).size).toBe(2);
+  it('contains three valid and different projects', () => {
+    expect(DEMO_DOCUMENTS).toHaveLength(3);
+    expect(new Set(DEMO_DOCUMENTS.map((doc) => doc.id)).size).toBe(3);
     for (const doc of DEMO_DOCUMENTS) {
       const result = ikGuideDocumentSchema.safeParse(doc);
       if (!result.success) {
@@ -21,6 +21,13 @@ describe('built-in demo projects', () => {
       for (const step of doc.steps) {
         expect(isKnownIllustration(step.illustration.illustrationId), `${doc.id} / ${step.id}`).toBe(true);
       }
+    }
+  });
+
+  it('keeps the old 2D projects free of 3D data', () => {
+    for (const doc of [bracketDocument, gearboxDocument]) {
+      expect(doc.assembly3d).toBeUndefined();
+      expect(doc.steps.every((step) => step.svgDiagram === undefined)).toBe(true);
     }
   });
 

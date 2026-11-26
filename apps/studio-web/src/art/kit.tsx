@@ -381,3 +381,64 @@ export function GenericStepArt({ highlight, arrows }: ArtProps) {
     </Scene>
   );
 }
+
+/** Isometric box used by the 3D fallback art (no WebGL, no network). */
+function IsoBox({
+  x,
+  y,
+  width,
+  depth,
+  height,
+  color = INK,
+  fill = PAPER,
+  sideFill = '#F2F4F7',
+}: {
+  x: number;
+  y: number;
+  width: number;
+  depth: number;
+  height: number;
+  color?: string;
+  fill?: string;
+  sideFill?: string;
+}) {
+  const dx = depth * 0.6;
+  const dy = depth * 0.42;
+  return (
+    <g stroke={color} strokeWidth={2.4} strokeLinejoin="round">
+      {/* top face */}
+      <polygon
+        points={`${x},${y} ${x + dx},${y - dy} ${x + dx + width},${y - dy} ${x + width},${y}`}
+        fill={fill}
+      />
+      {/* front face */}
+      <polygon points={`${x},${y} ${x + width},${y} ${x + width},${y + height} ${x},${y + height}`} fill={sideFill} />
+      {/* right face */}
+      <polygon
+        points={`${x + width},${y} ${x + width + dx},${y - dy} ${x + width + dx},${y - dy + height} ${x + width},${y + height}`}
+        fill={sideFill}
+      />
+    </g>
+  );
+}
+
+/**
+ * Fallback art for steps that came from a 3D assembly but have no rendered IKEA diagram yet
+ * (for example right after a merge). Deliberately flat: same three colours as the SVG renderer.
+ */
+export function CadAssemblyArt({ highlight, arrows }: ArtProps) {
+  const color = makeToneResolver(highlight);
+  const active = toneOf(highlight, 'active') ? TONE_COLOR.accent : color('active');
+  return (
+    <Scene caption="Изометрическая схема 3D-сборки">
+      <IsoBox x={90} y={190} width={250} depth={70} height={40} color={color('base')} />
+      <IsoBox x={140} y={158} width={140} depth={40} height={22} color={color('cover')} sideFill="#F2F4F7" />
+      <g opacity={0.9}>
+        <IsoBox x={300} y={96} width={54} depth={22} height={30} color={active} fill="#E8F2FF" sideFill="#E8F2FF" />
+      </g>
+      <Arrow x1={252} y1={150} x2={330} y2={86} color={active} label="по оси сборки" marker="accent" />
+      <Callout x={90} y={282} text="Деталь выделена синим · остальное уже установлено" anchor="start" color={INK_SOFT} size={14} />
+      <ArrowLayer arrows={arrows} />
+    </Scene>
+  );
+}
