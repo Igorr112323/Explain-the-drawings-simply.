@@ -6,7 +6,7 @@ import { renderIkeaSvg, type IkeaPartInput } from './ikeaSvg';
 /**
  * Offline 3D import: reads a `.glb`/`.gltf` fully in the browser, splits it into parts by node name
  * and produces a *draft* cad-api response, so that the studio can build an instruction without the
- * Python service (workshop tablet, plane, packaged Tauri/Capacitor shell).
+ * Python service (no server, no network — the packaged Tauri build included).
  *
  * The draft is honest about its limits: there is no real volume, no contact graph and no
  * disassembly simulation here — only node names, bounding boxes and a size-based order. STEP and STL

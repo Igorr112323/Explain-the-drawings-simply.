@@ -1,12 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  VisionError,
-  fetchVisionHealth,
-  newVisionSession,
-  recognizeRegion,
-  recognizeSheets,
-  type VisionRecognizeResponse,
-} from './vision';
+import { VisionError, fetchVisionHealth, recognizeSheets } from './vision';
 
 const HEALTH = {
   status: 'ok',
@@ -22,15 +15,15 @@ const HEALTH = {
 const CANDIDATE = {
   id: 'p0-c1',
   pageIndex: 0,
-  rawText: 'M8-7H',
-  normalizedText: 'М8-7H',
+  rawText: 'Ø20 H7',
+  normalizedText: 'Ø20 H7',
   xPercent: 40,
   yPercent: 30,
   bboxPercent: { x: 39, y: 29, w: 6, h: 3 },
-  confidence: 0.92,
-  ambiguousOptions: ['М8-7H', 'М6-7H'],
-  region: 'field' as const,
-  source: 'ocr' as const,
+  confidence: 0.98,
+  ambiguousOptions: [],
+  region: 'field',
+  source: 'ocr',
 };
 
 function jsonResponse(payload: unknown, status = 200) {
@@ -41,106 +34,77 @@ function jsonResponse(payload: unknown, status = 200) {
   } as unknown as Response;
 }
 
-const realFetch = globalThis.fetch;
+const sheet = (name = 'list.png') => new File([new Uint8Array([1, 2, 3])], name, { type: 'image/png' });
+
+let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
-  globalThis.fetch = vi.fn();
+  fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
 });
 
 afterEach(() => {
-  globalThis.fetch = realFetch;
-  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
-describe('vision client', () => {
-  it('reports the service as offline instead of throwing', async () => {
-    vi.mocked(globalThis.fetch).mockRejectedValue(new TypeError('Failed to fetch'));
-    await expect(fetchVisionHealth()).resolves.toBeNull();
-  });
-
-  it('reads the health payload', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse(HEALTH));
-    const health = await fetchVisionHealth();
-    expect(health?.ocr).toBe('rapidocr');
-    expect(health?.confidenceThreshold).toBe(0.95);
-  });
-
-  it('uploads sheets to the relative endpoint', async () => {
-    const payload: VisionRecognizeResponse = {
-      requestId: 'req-1',
-      candidates: [CANDIDATE],
-      titleBlock: null,
-      pages: [],
-      warnings: [],
-    };
-    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse(payload));
-
-    const file = new File([new Uint8Array([1, 2, 3])], 'sheet.png', { type: 'image/png' });
-    const result = await recognizeSheets([file]);
-
-    expect(result.candidates).toHaveLength(1);
-    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
-    expect(url).toBe('/v1/recognize');
-    expect(init?.method).toBe('POST');
-    expect(init?.body).toBeInstanceOf(FormData);
-    expect((init?.body as FormData).getAll('files')).toHaveLength(1);
-  });
-
-  it('surfaces a rejected sheet with the Russian reason from the service', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      jsonResponse({ detail: 'Файл не является изображением или повреждён' }, 422),
+describe('клиент распознавания', () => {
+  it('отправляет листы формой на /v1/recognize и возвращает кандидатов', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        requestId: 'req-1',
+        pages: [],
+        titleBlock: null,
+        candidates: [CANDIDATE],
+        warnings: ['Лист 1: рамка не найдена'],
+      }),
     );
-    const file = new File([new Uint8Array([0])], 'notes.txt', { type: 'text/plain' });
-    await expect(recognizeSheets([file])).rejects.toMatchObject({
-      name: 'VisionError',
+
+    const response = await recognizeSheets([sheet()]);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/v1/recognize');
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeInstanceOf(FormData);
+    expect(response.candidates[0]?.rawText).toBe('Ø20 H7');
+    expect(response.warnings).toHaveLength(1);
+  });
+
+  it('пустой список файлов — ошибка без запроса к сервису', async () => {
+    await expect(recognizeSheets([])).rejects.toBeInstanceOf(VisionError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('недоступный сервис превращается в понятное «запустите npm run dev:all»', async () => {
+    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(recognizeSheets([sheet()])).rejects.toMatchObject({
+      kind: 'offline',
+      message: expect.stringContaining('npm run dev:all'),
+    });
+  });
+
+  it('слишком большой файл помечается как rejected и объясняется по-русски', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ detail: 'Файл больше 20 МБ.' }, 413));
+    await expect(recognizeSheets([sheet()])).rejects.toMatchObject({
       kind: 'rejected',
-      message: 'Файл не является изображением или повреждён',
+      message: 'Файл больше 20 МБ.',
     });
   });
 
-  it('posts an ROI rectangle in percent', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      jsonResponse({ pageId: 'pg-1', candidates: [CANDIDATE], warnings: [] }),
-    );
-
-    const result = await recognizeRegion('pg-1', { x: 10, y: 20, w: 15, h: 8 });
-    expect(result.candidates).toHaveLength(1);
-
-    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
-    expect(url).toBe('/v1/recognize/roi');
-    expect(JSON.parse(String(init?.body))).toEqual({ pageId: 'pg-1', x: 10, y: 20, w: 15, h: 8, rotation: 0 });
-  });
-
-  it('maps a 404 ROI answer to a human explanation', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse({ detail: 'Лист не найден' }, 404));
-    await expect(recognizeRegion('pg-x', { x: 1, y: 1, w: 5, h: 5 })).rejects.toBeInstanceOf(VisionError);
-  });
-
-  it('builds a session from the recognition response', () => {
-    const session = newVisionSession({
-      requestId: 'req-9',
-      candidates: [CANDIDATE],
-      titleBlock: null,
-      pages: [
-        {
-          pageIndex: 0,
-          pageId: 'pg-9',
-          source: 'image',
-          width: 1200,
-          height: 900,
-          dpi: 150,
-          perspectiveCorrected: true,
-          warnings: [],
-          imageDataUrl: 'data:image/png;base64,AAA',
-        },
-      ],
-      warnings: ['Лист 1: перспектива выправлена автоматически.'],
+  it('непонятный ответ сервиса не роняет студию', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ detail: [{ msg: 'files: слишком много' }] }, 422));
+    await expect(recognizeSheets([sheet()])).rejects.toMatchObject({
+      kind: 'rejected',
+      message: 'files: слишком много',
     });
 
-    expect(session.pageId).toBe('pg-9');
-    expect(session.candidates).toHaveLength(1);
-    expect(session.manualNotations).toEqual([]);
-    expect(session.draftDocId).toBeNull();
-    expect(session.warnings[0]).toContain('перспектива');
+    fetchMock.mockResolvedValue(jsonResponse({ nope: true }));
+    await expect(recognizeSheets([sheet()])).rejects.toMatchObject({ kind: 'server' });
+  });
+
+  it('health возвращает null вместо исключения, если сервис лежит', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(HEALTH));
+    await expect(fetchVisionHealth()).resolves.toMatchObject({ ocrAvailable: true });
+
+    fetchMock.mockRejectedValue(new Error('down'));
+    await expect(fetchVisionHealth()).resolves.toBeNull();
   });
 });

@@ -111,7 +111,7 @@ jobs:
         run: cargo check --all-targets
 
   config-syntax:
-    name: Configs · YAML · JSON · XML · Tauri · Capacitor
+    name: Configs · YAML · JSON · Tauri
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

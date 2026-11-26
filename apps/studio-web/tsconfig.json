@@ -9,5 +9,5 @@
       "@ikguide/gost-translator": ["packages/gost-translator/src/index.ts"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "../../packages/pdf-exporter/src/svg2pdf.d.ts"]
 }

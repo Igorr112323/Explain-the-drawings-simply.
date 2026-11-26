@@ -272,14 +272,10 @@ describe('document io and step utilities', () => {
       }
     });
 
-    it('requires a GLB payload', () => {
+    it('does not insist on a GLB payload: the PDF is vector-only', () => {
       const doc = withAssembly(makeDocument());
-      const broken = { ...doc, assembly3d: { ...doc.assembly3d!, glbDataUrl: undefined } };
-      const result = ikGuideDocumentSchema.safeParse(broken);
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error.issues.some((issue) => issue.message.includes('GLB'))).toBe(true);
-      }
+      const withoutGlb = { ...doc, assembly3d: { ...doc.assembly3d!, glbDataUrl: undefined } };
+      expect(ikGuideDocumentSchema.safeParse(withoutGlb).success).toBe(true);
     });
 
     it('rejects parts pointing at a missing step', () => {

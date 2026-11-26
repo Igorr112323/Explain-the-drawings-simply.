@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "IkGuide — drawing to IKEA-style instruction platform: GOST/ESKD core, worker app and engineer studio.",
+  "description": "IkGuide — чертёж или 3D-модель в понятную PDF-инструкцию в стиле IKEA.",
   "workspaces": [
     "packages/*",
     "apps/studio-web"
@@ -29,10 +29,8 @@
     "desktop:dev": "npm --prefix apps/desktop-tauri run dev",
     "desktop:build": "npm --prefix apps/desktop-tauri run build",
     "desktop:icons": "bash apps/desktop-tauri/scripts/make-icons.sh",
-    "mobile:build-web": "npm run build -w @ikguide/studio-web",
-    "mobile:sync": "npm --prefix apps/mobile-capacitor run sync",
-    "mobile:apk": "npm --prefix apps/mobile-capacitor run apk",
-    "workshop:servers": "bash scripts/start-workshop-servers.sh"
+    "backend": "bash scripts/start-backend.sh",
+    "install:backend": "bash scripts/start-backend.sh install"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",

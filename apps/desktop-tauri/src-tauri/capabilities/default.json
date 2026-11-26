@@ -1,37 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Главное окно ИК-Гайд Инженер: нативные диалоги и запись файлов, которые выбрал сам инженер.",
+  "description": "Главное окно IkGuide: нативный диалог «Сохранить как…» и запись PDF, который выбрал человек.",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
     "dialog:default",
-    "dialog:allow-open",
     "dialog:allow-save",
     {
-      "identifier": "fs:allow-read-text-file",
-      "allow": [
-        {
-          "path": "$HOME/**"
-        },
-        {
-          "path": "$DESKTOP/**"
-        },
-        {
-          "path": "$DOCUMENT/**"
-        },
-        {
-          "path": "$DOWNLOAD/**"
-        },
-        {
-          "path": "$TEMP/**"
-        }
-      ]
-    },
-    {
-      "identifier": "fs:allow-write-text-file",
+      "identifier": "fs:allow-write-file",
       "allow": [
         {
           "path": "$HOME/**"

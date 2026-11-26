@@ -165,11 +165,13 @@ const assembly3dObjectSchema = z.object({
   parts: z.array(assemblyPartSchema).min(1, 'Каталог деталей не может быть пустым'),
 });
 
-/** Optional 3D block: old 2D documents stay valid without it. */
-export const assembly3dSchema = assembly3dObjectSchema.refine(
-  (value) => Boolean(value.glbDataUrl) || Boolean(value.glbUrl),
-  { message: 'Нужна ссылка на GLB: glbDataUrl или glbUrl', path: ['glbDataUrl'] },
-);
+/**
+ * Optional 3D block: old 2D documents stay valid without it.
+ *
+ * GLB-ссылка необязательна: инструкция рисует схемы шагов вектором (`svgDiagram`), а встроенная
+ * 3D-модель нужна только тому, кто хочет заново покрутить сборку в исходном файле.
+ */
+export const assembly3dSchema = assembly3dObjectSchema;
 
 export const stepSchema = z.object({
   id: z.string().min(1),

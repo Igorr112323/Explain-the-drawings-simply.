@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { getUnconfirmedAnnotations, ikGuideDocumentSchema } from '@ikguide/schema';
 import { translateEngineeringNotation } from '@ikguide/gost-translator';
-import { DEMO_DOCUMENTS, bracketDocument, gearboxDocument } from './demos';
+import { DEMO_DOCUMENTS, DEMO_PROJECTS, bracketDocument, gearboxDocument } from './demos';
 import { isKnownIllustration } from '../art/ids';
 
 describe('built-in demo projects', () => {
   it('contains three valid and different projects', () => {
     expect(DEMO_DOCUMENTS).toHaveLength(3);
+    expect(DEMO_PROJECTS.map((project) => project.id)).toEqual([
+      'demo-bracket',
+      'demo-gearbox',
+      'demo-up08-3d',
+    ]);
     expect(new Set(DEMO_DOCUMENTS.map((doc) => doc.id)).size).toBe(3);
     for (const doc of DEMO_DOCUMENTS) {
       const result = ikGuideDocumentSchema.safeParse(doc);

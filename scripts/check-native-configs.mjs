@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
- * Проверяет всё, что собирается только на GitHub Actions: Tauri-проект, Android-проект Capacitor,
- * workflow-файлы и цеховые скрипты.
+ * Проверяет всё, что собирается только в релизе: Tauri-проект для `.exe`, workflow-файлы и
+ * скрипты локального бэкенда.
  *
- * Здесь нет и не может быть `cargo check` / `gradle assembleDebug` — в песочнице разработки нет ни
- * Rust, ни JDK, ни Android SDK. Зато здесь ловятся опечатки в путях, битый JSON/YAML/XML, иконки не
- * того размера и разъехавшиеся идентификаторы приложения: именно они ломают релизную сборку.
+ * Здесь нет и не может быть `cargo check` — в песочнице разработки нет Rust. Зато здесь ловятся
+ * опечатки в путях, битый JSON/YAML, иконки не того размера и разъехавшиеся идентификаторы
+ * приложения: именно они ломают релизную сборку.
  *
  *   node scripts/check-native-configs.mjs
  */
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
@@ -48,45 +48,10 @@ function readJson(path) {
 
 function pngSize(path) {
   const bytes = readFileSync(path);
-  const signature = bytes.subarray(0, 8).toString('hex');
-  if (signature !== '89504e470d0a1a0a') {
+  if (bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') {
     return null;
   }
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
-}
-
-/** Минимальная проверка well-formed XML: парные теги в правильном порядке, без разбора атрибутов. */
-function xmlProblems(source) {
-  const problems = [];
-  const withoutComments = source.replace(/<!--[\s\S]*?-->/g, '');
-  const withoutDecl = withoutComments.replace(/<\?[\s\S]*?\?>/g, '');
-  const stack = [];
-  const tagPattern = /<\s*(\/?)\s*([A-Za-z_][\w.:-]*)([^>]*?)(\/?)\s*>/g;
-  let match;
-  let consumed = 0;
-  while ((match = tagPattern.exec(withoutDecl)) !== null) {
-    consumed += match[0].length;
-    const [, closing, name, , selfClosing] = match;
-    if (selfClosing === '/') {
-      continue;
-    }
-    if (closing === '/') {
-      const open = stack.pop();
-      if (open !== name) {
-        problems.push(`закрывающий </${name}> не совпадает с <${open ?? '—'}>`);
-        return problems;
-      }
-    } else {
-      stack.push(name);
-    }
-  }
-  if (stack.length > 0) {
-    problems.push(`не закрыты теги: ${stack.join(', ')}`);
-  }
-  if (consumed === 0) {
-    problems.push('файл не содержит тегов');
-  }
-  return problems;
 }
 
 /* ------------------------------------------------------------------ Tauri */
@@ -98,27 +63,22 @@ check('apps/desktop-tauri/src-tauri/tauri.conf.json существует', exist
 const tauriConf = readJson(tauriConfPath);
 check('productName задан', tauriConf.productName === 'IKGuide Studio', tauriConf.productName);
 check('identifier = ru.ikguide.studio', tauriConf.identifier === 'ru.ikguide.studio', tauriConf.identifier);
-check('окно 1360×860, минимум 960×640', (() => {
-  const window = tauriConf.app?.windows?.[0] ?? {};
-  return window.width === 1360 && window.height === 860 && window.minWidth === 960 && window.minHeight === 640;
-})());
-check('заголовок окна по-русски', (tauriConf.app?.windows?.[0]?.title ?? '').includes('ИК-Гайд'));
+
+const window = tauriConf.app?.windows?.[0] ?? {};
+check('окно 1360×860, минимум 960×640', window.width === 1360 && window.height === 860 && window.minWidth === 960 && window.minHeight === 640);
+check('заголовок окна по-русски и про PDF', (window.title ?? '').includes('PDF'), window.title);
+check('в конфиге нет упоминаний QR и мобильного приложения', !/QR|qr-код|apk/i.test(JSON.stringify(tauriConf)));
 
 const frontendDist = tauriConf.build?.frontendDist ?? '';
 const frontendResolved = resolve(tauriDir, 'src-tauri', frontendDist);
-check(
-  'frontendDist указывает на apps/studio-web/dist',
-  frontendResolved === join(ROOT, 'apps/studio-web/dist'),
-  frontendResolved,
-);
+check('frontendDist указывает на apps/studio-web/dist', frontendResolved === join(ROOT, 'apps/studio-web/dist'), frontendResolved);
 if (existsSync(join(frontendResolved, 'index.html'))) {
   check('веб-бандл собран (index.html на месте)', true);
 } else {
-  // В CI до `npm run build` бандла нет — это нормально, Tauri собирает его сам.
   note('веб-бандл ещё не собран: Tauri соберёт его в beforeBuildCommand');
 }
 check(
-  'beforeBuildCommand собирает пакеты и студию (нужен dist ядра)',
+  'beforeBuildCommand собирает пакеты и студию',
   String(tauriConf.build?.beforeBuildCommand ?? '').includes('npm run build'),
   tauriConf.build?.beforeBuildCommand,
 );
@@ -155,87 +115,17 @@ check('Cargo.toml: crate-type для Tauri 2', /crate-type\s*=\s*\[[^\]]*"cdylib
 const libRs = readFileSync(join(tauriDir, 'src-tauri/src/lib.rs'), 'utf8');
 const mainRs = readFileSync(join(tauriDir, 'src-tauri/src/main.rs'), 'utf8');
 check('lib.rs регистрирует плагины dialog и fs', libRs.includes('tauri_plugin_dialog::init()') && libRs.includes('tauri_plugin_fs::init()'));
-check('lib.rs отдаёт команду print_sheet', libRs.includes('fn print_sheet') && libRs.includes('generate_handler!'));
+check('lib.rs не печатает листы: PDF сохраняется файлом', !libRs.includes('printed') && !libRs.includes('window.print'));
 check('main.rs зовёт ikguide_studio_lib::run()', mainRs.includes('ikguide_studio_lib::run()'));
 check('main.rs скрывает консоль в release', mainRs.includes('windows_subsystem'));
 
 const capability = readJson(join(tauriDir, 'src-tauri/capabilities/default.json'));
 check('capabilities: окно main', (capability.windows ?? []).includes('main'));
 const permissions = (capability.permissions ?? []).map((entry) => (typeof entry === 'string' ? entry : entry.identifier));
-check(
-  'capabilities: dialog + fs',
-  permissions.includes('dialog:default') && permissions.includes('fs:allow-read-text-file'),
-);
-check(
-  'capabilities: чтение и запись текстовых файлов',
-  permissions.includes('fs:allow-read-text-file') && permissions.includes('fs:allow-write-text-file'),
-);
+check('capabilities: диалог «Сохранить как…»', permissions.includes('dialog:default') && permissions.includes('dialog:allow-save'));
+check('capabilities: запись бинарного PDF', permissions.includes('fs:allow-write-file'));
 
-/* --------------------------------------------------------------- Capacitor */
-
-section('Capacitor (.apk)');
-const mobileDir = join(ROOT, 'apps/mobile-capacitor');
-const capacitorConfig = readFileSync(join(mobileDir, 'capacitor.config.ts'), 'utf8');
-check('appId = ru.ikguide.worker', capacitorConfig.includes("appId: 'ru.ikguide.worker'"));
-check('appName = «ИК-Гайд Цех»', capacitorConfig.includes("appName: 'ИК-Гайд Цех'"));
-check('webDir → apps/studio-web/dist', capacitorConfig.includes("webDir: '../../apps/studio-web/dist'"));
-check('разрешён HTTP к цеховому серверу', /cleartext:\s*true/.test(capacitorConfig));
-
-const androidDir = join(mobileDir, 'android');
-for (const file of ['settings.gradle', 'build.gradle', 'variables.gradle', 'gradle.properties', 'gradlew', 'gradlew.bat', 'gradle/wrapper/gradle-wrapper.properties', 'gradle/wrapper/gradle-wrapper.jar']) {
-  check(`android/${file}`, existsSync(join(androidDir, file)));
-}
-const appGradle = readFileSync(join(androidDir, 'app/build.gradle'), 'utf8');
-check('applicationId совпадает с appId', appGradle.includes('applicationId "ru.ikguide.worker"'));
-check('Java 17 в compileOptions', appGradle.includes('JavaVersion.VERSION_17'));
-const wrapperProps = readFileSync(join(androidDir, 'gradle/wrapper/gradle-wrapper.properties'), 'utf8');
-check('Gradle wrapper 8.x', /gradle-8\.\d/.test(wrapperProps), wrapperProps.split('\n').find((line) => line.startsWith('distributionUrl')));
-
-const manifestPath = join(androidDir, 'app/src/main/AndroidManifest.xml');
-const manifest = readFileSync(manifestPath, 'utf8');
-const manifestProblems = xmlProblems(manifest);
-check('AndroidManifest.xml — корректный XML', manifestProblems.length === 0, manifestProblems.join('; '));
-for (const permission of ['INTERNET', 'CAMERA', 'ACCESS_NETWORK_STATE', 'READ_MEDIA_IMAGES', 'READ_EXTERNAL_STORAGE']) {
-  check(`AndroidManifest: ${permission}`, manifest.includes(`android.permission.${permission}`));
-}
-check('AndroidManifest: network_security_config', manifest.includes('@xml/network_security_config'));
-check('AndroidManifest: usesCleartextTraffic', manifest.includes('android:usesCleartextTraffic="true"'));
-
-const networkConfigPath = join(androidDir, 'app/src/main/res/xml/network_security_config.xml');
-check('res/xml/network_security_config.xml', existsSync(networkConfigPath));
-if (existsSync(networkConfigPath)) {
-  const problems = xmlProblems(readFileSync(networkConfigPath, 'utf8'));
-  check('network_security_config.xml — корректный XML', problems.length === 0, problems.join('; '));
-  check('network_security_config: cleartext для локальной сети', readFileSync(networkConfigPath, 'utf8').includes('cleartextTrafficPermitted="true"'));
-}
-
-for (const [folder, size] of Object.entries({
-  'mipmap-mdpi': 48,
-  'mipmap-hdpi': 72,
-  'mipmap-xhdpi': 96,
-  'mipmap-xxhdpi': 144,
-  'mipmap-xxxhdpi': 192,
-})) {
-  for (const name of ['ic_launcher.png', 'ic_launcher_round.png', 'ic_launcher_foreground.png']) {
-    const path = join(androidDir, 'app/src/main/res', folder, name);
-    const exists = existsSync(path);
-    check(`res/${folder}/${name}`, exists);
-    if (exists) {
-      const dimensions = pngSize(path);
-      check(`  ${folder}/${name} — ${size}×${size}`, dimensions?.width === size && dimensions?.height === size, JSON.stringify(dimensions));
-    }
-  }
-}
-
-const stringsXml = readFileSync(join(androidDir, 'app/src/main/res/values/strings.xml'), 'utf8');
-check('strings.xml: app_name «ИК-Гайд Цех»', stringsXml.includes('<string name="app_name">ИК-Гайд Цех</string>'));
-const stylesXml = readFileSync(join(androidDir, 'app/src/main/res/values/styles.xml'), 'utf8');
-check('styles.xml: тема запуска со сплэшем', stylesXml.includes('AppTheme.NoActionBarLaunch'));
-const mainActivity = readFileSync(join(androidDir, 'app/src/main/java/ru/ikguide/worker/MainActivity.java'), 'utf8');
-check('MainActivity в пакете ru.ikguide.worker', mainActivity.includes('package ru.ikguide.worker;'));
-check('MainActivity наследует BridgeActivity (камера через Capacitor)', mainActivity.includes('extends BridgeActivity'));
-
-/* --------------------------------------------------------------- Workflows */
+/* ------------------------------------------------------------------ Workflows */
 
 section('GitHub Actions');
 const workflowsDir = join(ROOT, '.github/workflows');
@@ -263,38 +153,52 @@ for (const file of ['ci.yml', 'release-builds.yml']) {
 
 const releaseYaml = readFileSync(join(workflowsDir, 'release-builds.yml'), 'utf8');
 check('release: сборка .exe на windows-latest', releaseYaml.includes('windows-latest'));
-check('release: сборка .apk на ubuntu-latest', releaseYaml.includes('ubuntu-latest'));
 check('release: Node 20', /NODE_VERSION:\s*'20'|node-version:\s*'20'/.test(releaseYaml));
 check('release: rust-toolchain', releaseYaml.includes('dtolnay/rust-toolchain'));
-check('release: Java 17 temurin', releaseYaml.includes('temurin') && releaseYaml.includes("'17'"));
-check('release: setup-android', releaseYaml.includes('android-actions/setup-android'));
-check('release: artifacts .exe / .apk', releaseYaml.includes('ikguide-studio-windows') && releaseYaml.includes('ikguide-worker-android'));
-check('release: тэг v* + workflow_dispatch', releaseYaml.includes("tags:") && releaseYaml.includes('workflow_dispatch'));
+check('release: нет Android/.apk', !/apk|android|capacitor|gradle/i.test(releaseYaml));
+check('release: артефакт .exe', releaseYaml.includes('ikguide-studio-windows'));
+check('release: архив локального бэкенда', releaseYaml.includes('ikguide-backend'));
+check('release: тэг v* + workflow_dispatch', releaseYaml.includes('tags:') && releaseYaml.includes('workflow_dispatch'));
+
+/* ------------------------------------------------------------------ Удалённое */
+
+section('Что удалено из продукта');
+check('нет apps/mobile-capacitor', !existsSync(join(ROOT, 'apps/mobile-capacitor')));
+check('нет scripts/start-workshop-servers.*', !existsSync(join(ROOT, 'scripts/start-workshop-servers.sh')) && !existsSync(join(ROOT, 'scripts/start-workshop-servers.bat')));
+const studioPkg = readJson(join(ROOT, 'apps/studio-web/package.json'));
+const allDeps = { ...studioPkg.dependencies, ...studioPkg.devDependencies };
+for (const legacy of ['qrcode', 'jsqr', 'fflate', '@types/qrcode']) {
+  check(`в студии нет зависимости ${legacy}`, !(legacy in allDeps));
+}
+const rootPkg = readJson(join(ROOT, 'package.json'));
+check('в корне нет скриптов mobile:*', !Object.keys(rootPkg.scripts ?? {}).some((name) => name.startsWith('mobile:')));
 
 /* ------------------------------------------------------------------ Скрипты */
 
-section('Скрипты цеха');
-const shPath = join(ROOT, 'scripts/start-workshop-servers.sh');
-const batPath = join(ROOT, 'scripts/start-workshop-servers.bat');
-check('scripts/start-workshop-servers.sh', existsSync(shPath));
-check('scripts/start-workshop-servers.bat', existsSync(batPath));
+section('Локальный бэкенд');
+const shPath = join(ROOT, 'scripts/start-backend.sh');
+const batPath = join(ROOT, 'scripts/start-backend.bat');
+check('scripts/start-backend.sh', existsSync(shPath));
+check('scripts/start-backend.bat', existsSync(batPath));
+check('npm run backend указывает на скрипт', String(rootPkg.scripts?.backend ?? '').includes('start-backend.sh'), rootPkg.scripts?.backend);
 if (existsSync(batPath)) {
   const bat = readFileSync(batPath, 'latin1');
   check('  .bat в формате CRLF (обязательно для cmd.exe)', bat.includes('\r\n'));
   check('  .bat запускает оба uvicorn-сервиса', (bat.match(/uvicorn/g) ?? []).length >= 2);
-  check('  .bat печатает адрес для планшета', bat.includes('8001'));
+  check('  .bat слушает только 127.0.0.1', bat.includes('127.0.0.1') && !bat.includes('--host 0.0.0.0'));
 }
 if (existsSync(shPath)) {
   const sh = readFileSync(shPath, 'utf8');
   check('  .sh со shebang', sh.startsWith('#!/usr/bin/env bash'));
   check('  .sh знает про install/run', sh.includes('install') && sh.includes('run'));
+  check('  .sh не открывает порты наружу', !sh.includes('--host 0.0.0.0'));
 }
 
 /* --------------------------------------------------------------- Итог */
 
 console.log(`\n${failures === 0 ? '✓' : '✗'} Проверок: ${checks}, провалов: ${failures}.`);
 if (failures > 0) {
-  console.error('\nКонфигурация нативной упаковки сломана — релизные сборки упадут.');
+  console.error('\nКонфигурация релизной сборки сломана — сборка .exe упадёт.');
   process.exit(1);
 }
-console.log('Нативные конфиги согласованы (сборка .exe/.apk выполняется на GitHub Actions: здесь нет Rust/JDK/Android SDK).');
+console.log('Конфиги согласованы (сборка .exe выполняется на GitHub Actions: здесь нет Rust).');

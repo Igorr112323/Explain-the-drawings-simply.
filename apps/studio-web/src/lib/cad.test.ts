@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CadError, cadHealth, cadImport, cadRenderView, cadFormatOf, needsCadServer, readMeshFile } from './cad';
+import { CadError, cadHealth, cadImport, cadFormatOf, needsCadServer, readMeshFile } from './cad';
 
 const originalFetch = globalThis.fetch;
 
@@ -62,22 +62,6 @@ describe('CAD service client', () => {
       code: 'unsupported_format',
       message: 'Формат .dwg не поддерживается.',
     });
-  });
-
-  it('sends the requested camera angles to render-view', async () => {
-    const spy = stubFetch(() => jsonResponse({ svg: '<svg/>', azimuth: 42, elevation: 18, triangles: 900 }));
-    const result = await cadRenderView({
-      sessionId: 'cad-1',
-      azimuth: 42,
-      elevation: 18,
-      activePartIds: ['part-1'],
-      installedPartIds: [],
-    });
-
-    expect(spy.mock.calls[0]?.[0]).toBe('/v1/cad/render-view');
-    const init = spy.mock.calls[0]?.[1];
-    expect(JSON.parse(String(init?.body))).toMatchObject({ sessionId: 'cad-1', azimuth: 42, elevation: 18 });
-    expect(result.svg).toBe('<svg/>');
   });
 
   it('knows which formats need the Python service', () => {

@@ -31,7 +31,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
-    // Relative base keeps the bundle usable from file:// inside Tauri and Capacitor.
+    // Relative base keeps the bundle usable from file:// inside the packaged Tauri shell.
     base: './',
     resolve: { alias: aliases },
     server: {

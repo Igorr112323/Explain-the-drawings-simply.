@@ -1,11 +1,11 @@
 import type { CadImportResponse, CadStepPayload } from '@ikguide/builder';
-import { detectRuntime, getCadBaseUrl, joinUrl, loadSettings } from './runtimeConfig';
+import { getCadBaseUrl, joinUrl } from './runtimeConfig';
 
 /**
  * Client of the local Python CAD service (port 8001 by default, proxied by Vite in the browser).
  *
  * The studio never hard-codes a host: `runtimeConfig` keeps `/v1/cad/...` relative on the web and
- * prefixes the saved workshop address inside the packaged `.exe` / `.apk`. The same bundle therefore
+ * prefixes the local address inside the packaged `.exe`. The same bundle therefore
  * works on the shop-floor laptop, in the preview sandbox and inside a native shell.
  * Everything here degrades gracefully: when the service is down the studio keeps working with the
  * built-in 3D demo and with the in-browser GLB loader.
@@ -42,30 +42,10 @@ export interface CadHealth {
   };
 }
 
-export interface CadRenderViewRequest {
-  sessionId: string;
-  azimuth: number;
-  elevation: number;
-  explode?: number;
-  activePartIds?: string[];
-  installedPartIds?: string[];
-  ghostPartIds?: string[];
-  attention?: string | null;
-  caption?: string | null;
-}
-
-export interface CadRenderViewResponse {
-  svg: string;
-  azimuth: number;
-  elevation: number;
-  triangles: number;
-}
-
 export type { CadImportResponse, CadStepPayload };
 
 const HEALTH_TIMEOUT_MS = 3000;
 const IMPORT_TIMEOUT_MS = 120_000;
-const RENDER_TIMEOUT_MS = 20_000;
 
 export const CAD_FORMATS = ['.glb', '.gltf', '.stl', '.obj', '.step', '.stp'] as const;
 export const STEP_FORMATS = ['.step', '.stp'] as const;
@@ -83,7 +63,7 @@ export function needsCadServer(fileName: string): boolean {
 
 /** Absolute address of the CAD service for the current shell (empty → Vite proxy on the web). */
 export function cadBaseUrl(): string {
-  return getCadBaseUrl(loadSettings(), detectRuntime());
+  return getCadBaseUrl();
 }
 
 async function request(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -138,22 +118,6 @@ export async function cadImport(file: File): Promise<CadImportResponse> {
     throw await readError(response, 'Не удалось разобрать 3D-модель.');
   }
   return (await response.json()) as CadImportResponse;
-}
-
-export async function cadRenderView(payload: CadRenderViewRequest): Promise<CadRenderViewResponse> {
-  const response = await request(
-    '/v1/cad/render-view',
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    },
-    RENDER_TIMEOUT_MS,
-  );
-  if (!response.ok) {
-    throw await readError(response, 'Не удалось построить IKEA-ракурс.');
-  }
-  return (await response.json()) as CadRenderViewResponse;
 }
 
 /**

@@ -41,13 +41,3 @@ ROI_UPSCALE = 2.0
 # --- page storage for ROI follow-ups --------------------------------------------------
 PAGE_TTL_SECONDS = 30 * 60
 MAX_STORED_PAGES = 32
-
-# --- published workshop guides (stage 5) ----------------------------------------------
-# Полная инструкция вместе с 3D-моделью весит десятки мегабайт, поэтому хранится на диске
-# цехового ПК, а в QR уезжает только короткая ссылка.
-MAX_GUIDE_BYTES = 64 * 1024 * 1024
-MAX_STORED_GUIDES = 200
-GUIDE_ID_LENGTH = 8
-GUIDES_SUBDIR = "data/guides"
-# Сколько последних инструкций отдавать в списке цеха.
-GUIDES_LIST_LIMIT = 50

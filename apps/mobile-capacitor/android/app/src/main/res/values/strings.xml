@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">ИК-Гайд Цех</string>
-    <string name="title_activity_main">ИК-Гайд Цех</string>
-    <string name="package_name">ru.ikguide.worker</string>
-    <string name="custom_url_scheme">ru.ikguide.worker</string>
-</resources>

@@ -9,7 +9,7 @@ import type { CadImportResponse } from '@ikguide/builder';
  * the red attention accent. Quality is coarser than the server renderer (which extracts real
  * silhouette edges from the triangles), but it needs no network and no WebGL, so a step diagram can
  * always be produced: on the shop-floor tablet with the CAD service stopped, and inside the packaged
- * Tauri/Capacitor shells.
+ * the packaged Tauri shell.
  *
  * SVG only — never a raster screenshot — so the drawing stays crisp on A4 and inside the print sheet.
  */

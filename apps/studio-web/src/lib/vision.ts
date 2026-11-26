@@ -1,20 +1,14 @@
-import type {
-  VisionCandidate,
-  VisionPage,
-  VisionRecognizeResponse,
-  VisionTitleBlock,
-} from '@ikguide/builder';
-import { detectRuntime, getVisionBaseUrl, joinUrl, loadSettings } from './runtimeConfig';
-
-export type { VisionCandidate, VisionPage, VisionRecognizeResponse, VisionTitleBlock };
-
 /**
- * Client of the local Python vision service.
+ * Клиент локального сервиса распознавания чертежей.
  *
- * Paths stay relative (`/v1/...`) in the browser, where the Vite dev/preview server proxies them to
- * port 8000. Inside the packaged `.exe` / `.apk` there is no proxy, so `runtimeConfig` supplies the
- * absolute workshop address the engineer typed in «Настройки и подключение».
+ * В браузере путь остаётся относительным (`/v1/recognize`) — его проксирует Vite; в упакованном `.exe`
+ * адрес берётся из `runtimeConfig` (127.0.0.1:8000). Наружу не уходит ни один байт.
  */
+import type { VisionRecognizeResponse } from '@ikguide/builder';
+import { joinUrl, getVisionBaseUrl } from './runtimeConfig';
+
+export type { VisionCandidate, VisionPage, VisionRecognizeResponse, VisionTitleBlock } from '@ikguide/builder';
+
 export type VisionErrorKind = 'offline' | 'rejected' | 'server';
 
 export class VisionError extends Error {
@@ -38,41 +32,11 @@ export interface VisionHealth {
   confidenceThreshold: number;
 }
 
-export interface VisionSession {
-  requestId: string | null;
-  pageId: string | null;
-  pages: VisionPage[];
-  titleBlock: VisionTitleBlock | null;
-  candidates: VisionCandidate[];
-  manualNotations: string[];
-  warnings: string[];
-  /** Id of the auto-built draft, so a rebuild replaces it instead of piling up copies. */
-  draftDocId: string | null;
-}
-
-export interface RegionResult {
-  pageId: string;
-  candidates: VisionCandidate[];
-  warnings: string[];
-}
-
-export interface RegionRect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  rotation?: number;
-}
-
 const HEALTH_TIMEOUT_MS = 4000;
 const RECOGNIZE_TIMEOUT_MS = 120_000;
 
-/**
- * Absolute address of the vision service for the current shell: empty on the web (the Vite proxy
- * answers `/health` and `/v1/...`), the saved workshop address inside `.exe` / `.apk`.
- */
 export function visionBaseUrl(): string {
-  return getVisionBaseUrl(loadSettings(), detectRuntime());
+  return getVisionBaseUrl();
 }
 
 async function request(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -80,14 +44,13 @@ async function request(url: string, init: RequestInit, timeoutMs: number): Promi
   const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
   const base = visionBaseUrl();
   const target = joinUrl(base, url);
-  const where = base ? ` по адресу ${base}` : '';
   try {
     return await fetch(target, { ...init, signal: controller.signal });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new VisionError('offline', `Сервис распознавания не ответил вовремя${where}.`);
-    }
-    throw new VisionError('offline', `Сервис распознавания недоступен${where}.`);
+  } catch {
+    throw new VisionError(
+      'offline',
+      'Сервис распознавания не отвечает. Запустите npm run dev:all и перетащите файл ещё раз.',
+    );
   } finally {
     globalThis.clearTimeout(timer);
   }
@@ -109,9 +72,9 @@ async function readDetail(response: Response): Promise<string> {
       }
     }
   } catch {
-    // Non-JSON error body: fall through to the generic message.
+    // Не-JSON ответ: ниже будет общее сообщение.
   }
-  return `Сервис вернул ошибку ${response.status}.`;
+  return `Сервис распознавания вернул ошибку ${response.status}.`;
 }
 
 export async function fetchVisionHealth(): Promise<VisionHealth | null> {
@@ -126,13 +89,15 @@ export async function fetchVisionHealth(): Promise<VisionHealth | null> {
   }
 }
 
+/** Отправляет лист чертежа в `/v1/recognize` и возвращает штамп + обозначения с координатами. */
 export async function recognizeSheets(files: readonly File[]): Promise<VisionRecognizeResponse> {
-  if (files.length === 0) {
-    throw new VisionError('rejected', 'Не выбран ни один файл чертежа.');
+  const drawings = files.filter((file) => file.size > 0);
+  if (drawings.length === 0) {
+    throw new VisionError('rejected', 'Не выбрано ни одного файла чертежа.');
   }
 
   const form = new FormData();
-  files.forEach((file) => form.append('files', file, file.name.length > 0 ? file.name : 'sheet.png'));
+  drawings.forEach((file) => form.append('files', file, file.name.length > 0 ? file.name : 'sheet.png'));
 
   const response = await request('/v1/recognize', { method: 'POST', body: form }, RECOGNIZE_TIMEOUT_MS);
   if (!response.ok) {
@@ -145,73 +110,4 @@ export async function recognizeSheets(files: readonly File[]): Promise<VisionRec
     throw new VisionError('server', 'Сервис вернул ответ неизвестного формата.');
   }
   return payload;
-}
-
-export async function recognizeRegion(pageId: string, rect: RegionRect): Promise<RegionResult> {
-  const response = await request(
-    '/v1/recognize/roi',
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pageId,
-        x: rect.x,
-        y: rect.y,
-        w: rect.w,
-        h: rect.h,
-        rotation: rect.rotation ?? 0,
-      }),
-    },
-    RECOGNIZE_TIMEOUT_MS,
-  );
-
-  if (!response.ok) {
-    const detail = await readDetail(response);
-    throw new VisionError(
-      response.status === 404 ? 'rejected' : response.status >= 500 ? 'server' : 'rejected',
-      detail,
-    );
-  }
-
-  const payload = (await response.json()) as RegionResult;
-  return { pageId: payload.pageId, candidates: payload.candidates ?? [], warnings: payload.warnings ?? [] };
-}
-
-export function newVisionSession(response: VisionRecognizeResponse): VisionSession {
-  const firstPage = response.pages?.[0] ?? null;
-  return {
-    requestId: response.requestId ?? null,
-    pageId: firstPage?.pageId ?? null,
-    pages: response.pages ?? [],
-    titleBlock: response.titleBlock ?? null,
-    candidates: response.candidates,
-    manualNotations: [],
-    warnings: response.warnings ?? [],
-    draftDocId: null,
-  };
-}
-
-/** A session without a scanned sheet: the engineer starts from hand-typed ciphers. */
-export function emptyVisionSession(): VisionSession {
-  return {
-    requestId: null,
-    pageId: null,
-    pages: [],
-    titleBlock: null,
-    candidates: [],
-    manualNotations: [],
-    warnings: [],
-    draftDocId: null,
-  };
-}
-
-export function mergeCandidate(existing: readonly VisionCandidate[], incoming: VisionCandidate): VisionCandidate[] {
-  const already = existing.some(
-    (candidate) =>
-      candidate.pageIndex === incoming.pageIndex &&
-      candidate.normalizedText === incoming.normalizedText &&
-      Math.abs(candidate.xPercent - incoming.xPercent) < 0.6 &&
-      Math.abs(candidate.yPercent - incoming.yPercent) < 0.6,
-  );
-  return already ? [...existing] : [...existing, incoming];
 }

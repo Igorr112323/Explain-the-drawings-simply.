@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Draw the IkGuide brand icons — the same plate, assembly node and arrow at every size.
 
-Why a script instead of committed PNGs only: the `.exe` needs an `.ico`, the `.apk` needs five
-`mipmap-*` PNGs, and Tauri wants 32/128/256/512 + `icon.ico`. One source of truth keeps them
-consistent, and anyone can regenerate them after a logo tweak.
+Why a script instead of committed PNGs only: Tauri wants 32/128/256/512 PNGs plus `icon.ico`
+(and `icon.icns` on macOS). One source of truth keeps them consistent, and anyone can
+regenerate them after a logo tweak.
 
 Usage (Pillow is already in the vision service venv):
     services/vision-api/.venv/bin/python scripts/build-icons.py
@@ -22,7 +22,6 @@ except ImportError:  # pragma: no cover - the venv always has Pillow
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TAURI_ICONS = ROOT / "apps/desktop-tauri/src-tauri/icons"
-ANDROID_RES = ROOT / "apps/mobile-capacitor/android/app/src/main/res"
 
 ACCENT = (0, 122, 255)
 INK = (17, 19, 24)
@@ -30,18 +29,10 @@ PAPER = (255, 255, 255)
 ACCENT_SOFT = (222, 236, 255)
 
 TAURI_SIZES = {"32x32.png": 32, "128x128.png": 128, "128x128@2x.png": 256, "icon.png": 512}
-# name -> (density folder, size in px)
-ANDROID_SIZES = {
-    "mipmap-mdpi": 48,
-    "mipmap-hdpi": 72,
-    "mipmap-xhdpi": 96,
-    "mipmap-xxhdpi": 144,
-    "mipmap-xxxhdpi": 192,
-}
 
 
 def draw_icon(size: int, *, round_plate: bool = False, transparent_background: bool = True) -> Image.Image:
-    """White plate on transparent (or blue on white for round Android icons) with a blue assembly."""
+    """White plate on transparent background with a blue assembly mark inside."""
     scale = 4  # supersampling: crisp diagonals even at 32 px
     canvas = size * scale
     image = Image.new("RGBA", (canvas, canvas), (0, 0, 0, 0))
@@ -130,48 +121,8 @@ def save_tauri_icons() -> list[pathlib.Path]:
     return written
 
 
-def save_android_icons() -> list[pathlib.Path]:
-    written: list[pathlib.Path] = []
-    for folder, size in ANDROID_SIZES.items():
-        target = ANDROID_RES / folder
-        target.mkdir(parents=True, exist_ok=True)
-        square = target / "ic_launcher.png"
-        draw_icon(size).save(square, format="PNG")
-        round_icon = target / "ic_launcher_round.png"
-        draw_icon(size, round_plate=True).save(round_icon, format="PNG")
-        foreground = target / "ic_launcher_foreground.png"
-        draw_icon(size, transparent_background=True).save(foreground, format="PNG")
-        written.extend([square, round_icon, foreground])
-    return written
-
-
-def draw_splash(width: int, height: int) -> Image.Image:
-    """Launch screen: paper background, the mark at ~22 % of the short side, no text."""
-    image = Image.new("RGB", (width, height), (249, 249, 251))
-    side = int(min(width, height) * 0.26)
-    if side < 24:
-        side = 24
-    mark = draw_icon(side)
-    image.paste(mark, ((width - side) // 2, (height - side) // 2), mark)
-    return image
-
-
-def save_android_splashes() -> list[pathlib.Path]:
-    """Re-draws every splash PNG the Android template ships, keeping its exact size."""
-    written: list[pathlib.Path] = []
-    for splash in sorted(ANDROID_RES.glob("drawable*/splash.png")):
-        try:
-            with Image.open(splash) as current:
-                size = current.size
-        except OSError:
-            continue
-        draw_splash(*size).save(splash, format="PNG")
-        written.append(splash)
-    return written
-
-
 def main() -> int:
-    written = save_tauri_icons() + save_android_icons() + save_android_splashes()
+    written = save_tauri_icons()
     for path in written:
         print(f"· {path.relative_to(ROOT)}")
     print(f"Готово: {len(written)} файлов иконок.")

@@ -1,108 +1,71 @@
 /**
- * Native file access for the packaged shells.
+ * Сохранение готового PDF.
  *
- * In the browser an instruction leaves the studio as a download. Inside the `.exe` (Tauri) the
- * engineer expects a real `Сохранить как…` dialog with `.ikguide.json`, PDF or a standalone HTML —
- * so this module talks to the Tauri dialog/fs plugins, and **falls back to the ordinary browser
- * download** everywhere else (including a Tauri build where a plugin is missing).
+ * В браузере файл уходит обычным скачиванием (никакого диалога печати). В упакованном `.exe`
+ * (Tauri) пользователь ждёт нативное «Сохранить как…» — поэтому там вызываются плагины
+ * dialog/fs, а при любой их отсутствии мы молча откатываемся к скачиванию.
  *
- * Every import is dynamic: the web bundle never loads the native plugins, and Vitest/jsdom never
- * resolves them at all.
+ * Все импорты нативных плагинов динамические: веб-сборка их не тянет, тесты не резолвят.
  */
 import { detectRuntime } from './runtimeConfig';
-import { downloadText, sanitizeFileName } from './download';
+
+export const PDF_MIME = 'application/pdf';
 
 export function isNativeShell(): boolean {
   return detectRuntime() === 'tauri-desktop';
 }
 
-/** Optional Tauri-only extras used by the UI to relabel buttons: «Сохранить на диск» vs «Скачать». */
+/** Подпись кнопки: в `.exe` — «Сохранить PDF», в браузере — «Скачать PDF-инструкцию». */
 export function saveLabel(): string {
-  return isNativeShell() ? 'Сохранить на диск' : 'Скачать';
+  return isNativeShell() ? 'Сохранить PDF' : 'Скачать PDF-инструкцию';
 }
 
-export interface SaveTextResult {
+export interface SaveFileResult {
   saved: boolean;
-  /** Where the file went, for the toast. */
+  /** Куда сохранили (только в нативном диалоге). */
   path: string | null;
-  /** True when the platform fell back to a browser download. */
+  /** `true`, если сработало обычное скачивание вместо нативного диалога. */
   fallback: boolean;
 }
 
-async function tauriSave(defaultName: string, text: string, filters: { name: string; extensions: string[] }[]) {
-  const [{ save }, { writeTextFile }] = await Promise.all([
+function downloadBlob(fileName: string, bytes: Uint8Array, mime: string): void {
+  const blob = new Blob([bytes as unknown as BlobPart], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.rel = 'noopener';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  globalThis.setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+async function tauriSaveBinary(fileName: string, bytes: Uint8Array): Promise<SaveFileResult> {
+  const [{ save }, { writeFile }] = await Promise.all([
     import('@tauri-apps/plugin-dialog'),
     import('@tauri-apps/plugin-fs'),
   ]);
-  const path = await save({ defaultPath: defaultName, filters });
-  if (!path) {
-    return { saved: false, path: null, fallback: false } satisfies SaveTextResult;
-  }
-  await writeTextFile(path, text);
-  return { saved: true, path, fallback: false } satisfies SaveTextResult;
-}
-
-/** Saves a text payload (JSON/HTML) with a native dialog in the `.exe`, a download elsewhere. */
-export async function saveTextFile(
-  fileName: string,
-  text: string,
-  options: { mimeType?: string; kind?: 'json' | 'html' } = {},
-): Promise<SaveTextResult> {
-  const kind = options.kind ?? 'json';
-  const filters =
-    kind === 'html'
-      ? [{ name: 'Автономная HTML-инструкция', extensions: ['html'] }]
-      : [{ name: 'Инструкция IkGuide', extensions: ['json'] }];
-  if (isNativeShell()) {
-    try {
-      return await tauriSave(fileName, text, filters);
-    } catch {
-      // Plugin unavailable or the user cancelled inside a failing window: fall through to download.
-    }
-  }
-  downloadText(fileName, text, options.mimeType ?? (kind === 'html' ? 'text/html' : 'application/json'));
-  return { saved: true, path: null, fallback: true };
-}
-
-/** Opens a text file through the native dialog in the `.exe`; returns null when the user cancels. */
-export async function openTextFileNative(): Promise<{ name: string; path: string; text: string } | null> {
-  if (!isNativeShell()) {
-    return null;
-  }
-  const [{ open }, { readTextFile }] = await Promise.all([
-    import('@tauri-apps/plugin-dialog'),
-    import('@tauri-apps/plugin-fs'),
-  ]);
-  const picked = await open({
-    multiple: false,
-    directory: false,
-    filters: [{ name: 'Инструкция IkGuide', extensions: ['json'] }],
+  const path = await save({
+    defaultPath: fileName,
+    filters: [{ name: 'PDF-инструкция', extensions: ['pdf'] }],
   });
-  if (!picked || Array.isArray(picked)) {
-    return null;
+  if (!path) {
+    return { saved: false, path: null, fallback: false };
   }
-  const text = await readTextFile(picked);
-  const name = picked.split(/[\\/]/).pop() ?? 'guide.json';
-  return { name, path: picked, text };
+  await writeFile(path, bytes);
+  return { saved: true, path, fallback: false };
 }
 
-/** Prints the current sheet through the Tauri window API, falling back to `window.print()`. */
-export async function printNative(): Promise<void> {
+/** Сохраняет PDF: нативный диалог в `.exe`, скачивание в браузере. */
+export async function savePdfFile(fileName: string, bytes: Uint8Array): Promise<SaveFileResult> {
   if (isNativeShell()) {
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('print_sheet');
-      return;
+      return await tauriSaveBinary(fileName, bytes);
     } catch {
-      // Command missing in an older build: use the browser path.
+      // Плагин недоступен или окно закрылось — обычное скачивание всё равно сработает.
     }
   }
-  if (typeof window !== 'undefined') {
-    window.print();
-  }
-}
-
-/** File name for a guide package, shared by the browser and the native shells. */
-export function guideFileName(code: string): string {
-  return `${sanitizeFileName(code)}.ikguide.json`;
+  downloadBlob(fileName, bytes, PDF_MIME);
+  return { saved: true, path: null, fallback: true };
 }

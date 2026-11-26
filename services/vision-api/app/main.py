@@ -1,26 +1,20 @@
-"""HTTP API: распознавание листов, ROI для «Рентгена» и цеховой QR-мост.
+"""HTTP API: распознавание листов чертежа и ROI для правки обозначений.
 
-Распознавание отдаёт только геометрию и текст с честной уверенностью; превращение
-обозначений в инструкцию IKEA делает TypeScript (`@ikguide/builder`), где живёт ядро ГОСТ.
-
-С этапа 5 сервис ещё и цеховой сервер публикаций: `POST /v1/guides` кладёт полную
-инструкцию (с 3D-моделью) на диск, `GET /v1/guides/{id}` отдаёт её телефону рабочего, а
-`GET /v1/network-info` подсказывает инженеру LAN-адрес для QR-кода.
+Сервис отдаёт только геометрию и текст с честной уверенностью. Превращение обозначений в
+инструкцию и сам PDF делает TypeScript (`@ikguide/builder` + `@ikguide/pdf-exporter`), поэтому
+Python здесь ничего не знает ни про вёрстку, ни про файлы на диске.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import threading
 import uuid
 from typing import Sequence
 
 import cv2
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from . import config
@@ -34,9 +28,7 @@ from .extractor import (
     ocr_region,
     parse_title_block,
 )
-from .guides import GuideError, GuideStore
 from .layout import Box
-from .network import network_info
 from .ocr import NoopOcrEngine, OcrEngine, create_ocr_engine
 from .pages import (
     PageStore,
@@ -46,7 +38,6 @@ from .pages import (
 )
 from .preprocessing import encode_data_url
 from .quality import describe
-from .studio_static import mount_studio, resolve_studio_dist
 from .schemas import (
     Candidate,
     EngineInfo,
@@ -88,7 +79,6 @@ class EngineState:
 
 engine_state = EngineState()
 page_store = PageStore()
-guide_store = GuideStore()
 
 app = FastAPI(
     title="IKGuide Vision API",
@@ -131,202 +121,14 @@ def health() -> HealthResponse:
     )
 
 
-# ---------------------------------------------------------------- публикации цеха (этап 5)
-
-
-class GuideSummaryOut(BaseModel):
-    """Карточка опубликованной инструкции."""
-
-    id: str
-    title: str
-    drawingCode: str
-    revision: str = ""
-    createdAt: str
-    sizeBytes: int
-    has3d: bool
-    steps: int
-    url: str
-
-
-class GuidePublishOut(GuideSummaryOut):
-    """Ответ на публикацию: короткий id и готовая ссылка для QR."""
-
-    absoluteUrl: str
-    guideId: str = ""
-    deduplicated: bool = False
-
-
-class GuideListOut(BaseModel):
-    count: int
-    guides: list[GuideSummaryOut]
-
-
-class NetworkAddressOut(BaseModel):
-    ip: str
-    kind: str
-    primary: bool = False
-
-
-class NetworkInfoOut(BaseModel):
-    status: str = "ok"
-    hostname: str
-    primary: str
-    primaryIsLan: bool = False
-    addresses: list[NetworkAddressOut] = Field(default_factory=list)
-    guidePort: int = 8000
-    suggestedApiBase: str
-    studioAvailable: bool = False
-
-
-def _guide_summary_out(summary) -> GuideSummaryOut:
-    data = summary.as_dict()
-    return GuideSummaryOut(**data)
-
-
-def _http_error(error: GuideError) -> HTTPException:
-    return HTTPException(status_code=error.status, detail=error.message)
-
-
-_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0", "::1", "[::1]"}
-
-
-def _public_base(request: Request) -> str:
-    """Адрес, по которому сервис виден цеху, а не самому себе.
-
-    Инженер публикует инструкцию с ноутбука цеха через `http://127.0.0.1:8000` — такая ссылка
-    бессмысленна для телефона, поэтому loopback подменяется на LAN-адрес из `network_info`.
-    """
-
-    base = str(request.base_url).rstrip("/")
-    host = request.url.hostname or ""
-    if host not in _LOOPBACK_HOSTS:
-        return base
-    try:
-        suggested = network_info(request.url.port).get("suggestedApiBase")
-    except OSError:
-        return base
-    return suggested.rstrip("/") if isinstance(suggested, str) and suggested else base
-
-
-@app.post("/v1/guides", response_model=GuidePublishOut, status_code=201)
-async def publish_guide(request: Request) -> GuidePublishOut:
-    """Принимает полный `IkGuideDocument` (вместе с 3D) и возвращает короткий id."""
-
-    declared = request.headers.get("content-length")
-    if declared is not None:
-        try:
-            declared_bytes = int(declared)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Некорректный заголовок Content-Length.") from None
-        if declared_bytes > config.MAX_GUIDE_BYTES:
-            limit_mb = config.MAX_GUIDE_BYTES // (1024 * 1024)
-            raise HTTPException(
-                status_code=413,
-                detail=f"Инструкция больше {limit_mb} МБ. Сожмите 3D-модель или опубликуйте версию без .glb.",
-            )
-
-    raw = await request.body()
-    if not raw:
-        raise HTTPException(status_code=400, detail="Пустой запрос: пришлите JSON инструкции .ikguide.json.")
-    if len(raw) > config.MAX_GUIDE_BYTES:
-        limit_mb = config.MAX_GUIDE_BYTES // (1024 * 1024)
-        raise HTTPException(
-            status_code=413,
-            detail=f"Инструкция больше {limit_mb} МБ. Сожмите 3D-модель или опубликуйте версию без .glb.",
-        )
-
-    try:
-        document = json.loads(raw)
-    except json.JSONDecodeError as error:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Не удалось разобрать JSON инструкции: {error.msg} (строка {error.lineno}).",
-        ) from None
-
-    before = {summary.sha256 for summary in guide_store.summaries(limit=guide_store.max_guides)}
-    try:
-        summary = await run_in_threadpool(guide_store.save, document, len(raw))
-    except GuideError as error:
-        raise _http_error(error) from None
-
-    absolute = f"{_public_base(request)}{summary.as_dict()['url']}"
-    payload = _guide_summary_out(summary).model_dump()
-    payload.update(
-        {
-            "absoluteUrl": absolute,
-            "guideId": summary.id,
-            "deduplicated": summary.sha256 in before,
-        }
-    )
-    return GuidePublishOut(**payload)
-
-
-@app.get("/v1/guides", response_model=GuideListOut)
-def list_guides(limit: int = config.GUIDES_LIST_LIMIT) -> GuideListOut:
-    """Последние опубликованные инструкции цеха (без тяжёлых тел документов)."""
-
-    capped = max(1, min(limit, guide_store.max_guides))
-    summaries = guide_store.summaries(limit=capped)
-    guides = [_guide_summary_out(summary) for summary in summaries]
-    return GuideListOut(count=len(guides), guides=guides)
-
-
-@app.get("/v1/guides/{guide_id}")
-def get_guide(guide_id: str) -> JSONResponse:
-    """Отдаёт сохранённый `IkGuideDocument` целиком — телефон рабочего скачает его по Wi-Fi."""
-
-    try:
-        document = guide_store.get(guide_id)
-    except GuideError as error:
-        raise _http_error(error) from None
-    if document is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Инструкция не найдена: возможно, её удалили с цехового сервера или ссылка устарела.",
-        )
-    return JSONResponse(
-        content=document,
-        headers={"cache-control": "public, max-age=60", "access-control-allow-origin": "*"},
-    )
-
-
-@app.get("/v1/network-info", response_model=NetworkInfoOut)
-def network_info_endpoint(request: Request) -> NetworkInfoOut:
-    """LAN-адреса ПК: из них студия собирает ссылку `http://<ip>:8000/?guideId=…`."""
-
-    port = request.url.port or 8000
-    info = network_info(service_port=port)
-    info["studioAvailable"] = resolve_studio_dist() is not None
-    return NetworkInfoOut(**info)
-
-
 @app.get("/")
-def root(request: Request):
-    """JSON для API-клиентов, собранная студия — для браузера/Safari на iPhone."""
-
-    dist = resolve_studio_dist()
-    accept = request.headers.get("accept", "").lower()
-    # Сканер в телефоне и встроенный WebView часто присылают `*/*` вместо `text/html`: ссылка из QR
-    # должна открывать приложение, а не JSON. `*/*` без ссылки и явный `application/json` — это
-    # API-клиенты, им по-прежнему отвечает JSON.
-    explicit_json = "application/json" in accept and "text/html" not in accept
-    has_guide_link = "guideId" in request.query_params or "guide" in request.query_params
-    wants_html = "text/html" in accept or (has_guide_link and not explicit_json)
-    if dist is not None and wants_html and not explicit_json:
-        return FileResponse(dist / "index.html")
+def root():
+    """Короткая карта API: сервис нужен только для распознавания листов."""
 
     return {
         "service": config.SERVICE_NAME,
         "version": config.SERVICE_VERSION,
-        "endpoints": [
-            "/health",
-            "/v1/recognize",
-            "/v1/recognize/roi",
-            "/v1/guides",
-            "/v1/guides/{id}",
-            "/v1/network-info",
-        ],
-        "studio": "http://<lan-ip>:8000/?guideId=<id>&api=http://<lan-ip>:8000" if dist is not None else None,
+        "endpoints": ["/health", "/v1/recognize", "/v1/recognize/roi"],
         "docs": "/docs",
     }
 
@@ -514,11 +316,3 @@ async def recognize_roi(payload: RoiRequest) -> RoiResponse:
         warnings.append("В выделенной области текст не найден. Выделите шире или введите обозначение вручную.")
 
     return RoiResponse(pageId=page.page_id, candidates=candidates, warnings=warnings)
-
-
-# --- раздача собранной веб-студии (этап 5) --------------------------------------------
-# Регистрируется последней: маршруты /v1/... и /health уже объявлены и поэтому выигрывают
-# у статики. Если папки dist рядом нет — сервис работает как обычно, без статики.
-_STUDIO_DIST = resolve_studio_dist()
-if _STUDIO_DIST is not None:
-    mount_studio(app, _STUDIO_DIST)

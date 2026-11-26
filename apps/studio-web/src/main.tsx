@@ -1,10 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import { primeSpeechVoices } from './lib/speech';
 import './styles/global.css';
-
-primeSpeechVoices();
 
 const container = document.getElementById('root');
 if (!container) {
