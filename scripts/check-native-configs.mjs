@@ -193,6 +193,7 @@ check(
   (releaseYaml.match(/git clone[^\n]*ikguide/g) ?? []).length >= 2,
 );
 check('release: причина падения Tauri видна в аннотации', releaseYaml.includes('::error title=Сборка Tauri упала'));
+check('release: движок прикрепляется к Release архивом', releaseYaml.includes('ikguide-engine.zip'));
 check('release: установщик IKGuide-Studio-Setup.exe', releaseYaml.includes('IKGuide-Studio-Setup.exe'));
 check('release: движок PyInstaller отдельной джобой', /build-engine-windows/.test(releaseYaml) && releaseYaml.includes('pyinstaller'));
 check(

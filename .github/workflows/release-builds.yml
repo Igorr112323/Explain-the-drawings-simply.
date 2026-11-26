@@ -157,6 +157,7 @@ jobs:
   # -------------------------------------------- Локальный движок (два .exe, PyInstaller)
   build-engine-windows:
     name: Движок Python (PyInstaller)
+    needs: checks
     runs-on: windows-latest
     # Тяжёлая и капризная упаковка не должна блокировать выпуск UI-сборки.
     continue-on-error: true
@@ -229,6 +230,9 @@ jobs:
           '@ | Set-Content -Encoding UTF8 artifacts/engine/ПРОЧТИ-МЕНЯ.txt
           Get-ChildItem artifacts/engine
 
+      - name: Собрать zip движка
+        run: Compress-Archive -Path C:\ikguide\artifacts\engine\* -DestinationPath C:\ikguide\artifacts\ikguide-engine.zip -Force
+
       - name: Артефакт ikguide-engine-windows
         uses: actions/upload-artifact@v4
         with:
@@ -236,6 +240,13 @@ jobs:
           path: C:\ikguide\artifacts\engine\*
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Прикрепить движок к Release (только по тегу)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: C:\ikguide\artifacts\ikguide-engine.zip
+          fail_on_unmatched_files: false
 
   # ------------------------------------------------- Локальный бэкенд (архив)
   build-portable-backend:
