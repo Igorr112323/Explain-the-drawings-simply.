@@ -170,7 +170,13 @@ export function ReviewStage({
     const deskNode = desk.current;
     if (deskNode) {
       requestAnimationFrame(() => {
-        deskNode.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
+        // В старых движках (и в jsdom) у элемента нет scrollTo — пишем позицию напрямую.
+        if (typeof deskNode.scrollTo === 'function') {
+          deskNode.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
+          return;
+        }
+        deskNode.scrollLeft = 0;
+        deskNode.scrollTop = 0;
       });
     }
   }, [zoomAround]);

@@ -69,4 +69,23 @@ export function installJsdomSvgGeometry(): void {
   }
 }
 
+/**
+ * Прокрутка элемента: в браузере `scrollTo` есть у любого элемента, в jsdom — нет, и вызов из
+ * `requestAnimationFrame` превращался в необработанное исключение уже после теста.
+ */
+export function installScrollStubs(): void {
+  if (typeof window === 'undefined' || typeof window.Element === 'undefined') {
+    return;
+  }
+  const prototype = window.Element.prototype as unknown as Record<string, unknown>;
+  for (const method of ['scrollTo', 'scrollBy', 'scrollIntoView']) {
+    if (typeof prototype[method] !== 'function') {
+      prototype[method] = function noopScroll(this: Element): void {
+        void this;
+      };
+    }
+  }
+}
+
 installJsdomSvgGeometry();
+installScrollStubs();
