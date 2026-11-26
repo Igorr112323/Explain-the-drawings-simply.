@@ -131,7 +131,16 @@ jobs:
         run: npm install --prefix apps/desktop-tauri --no-audit --no-fund
 
       - name: Проверить конфигурацию Tauri
-        run: node scripts/check-native-configs.mjs
+        # Логи Actions из некоторых сред недоступны: проваленные проверки печатаются аннотацией.
+        run: |
+          node scripts/check-native-configs.mjs 2>&1 | Tee-Object -FilePath native-check.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content native-check.log | Select-String -Pattern '✗' | Select-Object -First 25 | ForEach-Object {
+              $line = $_.ToString().Replace('%', '%25')
+              Write-Host "::error title=check:native::$line"
+            }
+            exit 1
+          }
 
       - name: Собрать установщик (NSIS)
         # Вывод дублируется в аннотацию при падении: логи Actions в некоторых средах недоступны,

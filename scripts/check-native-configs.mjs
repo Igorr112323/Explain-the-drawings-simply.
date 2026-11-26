@@ -14,6 +14,11 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 
+/** Читает текст с LF: Windows-checkout может переписать файл в CRLF, а проверки сравнивают строки. */
+function readText(path) {
+  return readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+}
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 let failures = 0;
@@ -40,7 +45,7 @@ function section(title) {
 
 function readJson(path) {
   try {
-    return JSON.parse(readFileSync(path, 'utf8'));
+    return JSON.parse(readText(path));
   } catch (error) {
     throw new Error(`${relative(ROOT, path)}: ${error.message}`);
   }
@@ -167,7 +172,7 @@ const templatePath = join(nsisDir, 'installer.nsi');
 const templateExists = existsSync(templatePath);
 check('nsis/installer.nsi существует', templateExists);
 if (templateExists) {
-  const nsi = readFileSync(templatePath, 'utf8');
+  const nsi = readText(templatePath);
   check('  шаблон подключает MUI2', nsi.includes('!include MUI2.nsh'));
   check('  шаблон включает XPStyle и DPI-awareness', nsi.includes('XPStyle on') && nsi.includes('ManifestDPIAware true'));
   check('  плоский белый фон (MUI_BGCOLOR) и чернильный текст', nsi.includes('!define MUI_BGCOLOR "FFFFFF"') && nsi.includes('!define MUI_TEXTCOLOR "1C1C1E"'));
@@ -200,14 +205,14 @@ if (templateExists) {
   }
 }
 
-const cargo = readFileSync(join(tauriDir, 'src-tauri/Cargo.toml'), 'utf8');
+const cargo = readText(join(tauriDir, 'src-tauri/Cargo.toml'));
 check('Cargo.toml: пакет ikguide-studio', /name\s*=\s*"ikguide-studio"/.test(cargo));
 check('Cargo.toml: Rust edition 2021', /edition\s*=\s*"2021"/.test(cargo));
 check('Cargo.toml: tauri 2 + dialog + fs', /tauri\s*=\s*\{\s*version\s*=\s*"2"/.test(cargo) && /tauri-plugin-dialog\s*=\s*"2"/.test(cargo) && /tauri-plugin-fs\s*=\s*"2"/.test(cargo));
 check('Cargo.toml: crate-type для Tauri 2', /crate-type\s*=\s*\[[^\]]*"cdylib"/.test(cargo));
 
-const libRs = readFileSync(join(tauriDir, 'src-tauri/src/lib.rs'), 'utf8');
-const mainRs = readFileSync(join(tauriDir, 'src-tauri/src/main.rs'), 'utf8');
+const libRs = readText(join(tauriDir, 'src-tauri/src/lib.rs'));
+const mainRs = readText(join(tauriDir, 'src-tauri/src/main.rs'));
 check('lib.rs регистрирует плагины dialog и fs', libRs.includes('tauri_plugin_dialog::init()') && libRs.includes('tauri_plugin_fs::init()'));
 check('lib.rs не печатает листы: PDF сохраняется файлом', !libRs.includes('printed') && !libRs.includes('window.print'));
 check('lib.rs умеет тихо поднять движок из папки engine', /engine/.test(libRs) && /ikguide-vision\.exe/.test(libRs));
@@ -239,9 +244,9 @@ for (const [service, exe] of [['vision-api', 'ikguide-vision']]) {
   const entry = join(ROOT, 'services', service, 'engine_entry.py');
   check(`services/${service}/engine_entry.py для PyInstaller`, existsSync(entry));
   if (existsSync(entry)) {
-    const source = readFileSync(entry, 'utf8');
+    const source = readText(entry);
     check(`  ${service}: слушает только 127.0.0.1`, source.includes('127.0.0.1') && !source.includes('0.0.0.0'));
-    check(`  ${service}: имя ${exe} упоминается в workflow`, readFileSync(join(ROOT, '.github/workflows/release-builds.yml'), 'utf8').includes(exe));
+    check(`  ${service}: имя ${exe} упоминается в workflow`, readText(join(ROOT, '.github/workflows/release-builds.yml')).includes(exe));
   }
 }
 
@@ -258,7 +263,7 @@ for (const file of ['ci.yml', 'release-builds.yml']) {
   }
   let workflow;
   try {
-    workflow = parseYaml(readFileSync(path, 'utf8'));
+    workflow = parseYaml(readText(path));
   } catch (error) {
     check(`  ${file}: YAML парсится`, false, error.message);
     continue;
@@ -271,7 +276,7 @@ for (const file of ['ci.yml', 'release-builds.yml']) {
   }
 }
 
-const releaseYaml = readFileSync(join(workflowsDir, 'release-builds.yml'), 'utf8');
+const releaseYaml = readText(join(workflowsDir, 'release-builds.yml'));
 check('release: понятное имя workflow «Build Windows .exe»', /^name:\s*Build Windows \.exe\s*$/m.test(releaseYaml));
 check('release: сборка .exe на windows-latest', releaseYaml.includes('windows-latest'));
 check('release: Node 20', /NODE_VERSION:\s*'20'|node-version:\s*'20'/.test(releaseYaml));
@@ -336,7 +341,7 @@ if (existsSync(batPath)) {
   check('  .bat слушает только 127.0.0.1', bat.includes('127.0.0.1') && !bat.includes('--host 0.0.0.0'));
 }
 if (existsSync(shPath)) {
-  const sh = readFileSync(shPath, 'utf8');
+  const sh = readText(shPath);
   check('  .sh со shebang', sh.startsWith('#!/usr/bin/env bash'));
   check('  .sh знает про install/run', sh.includes('install') && sh.includes('run'));
   check('  .sh не открывает порты наружу', !sh.includes('--host 0.0.0.0'));
