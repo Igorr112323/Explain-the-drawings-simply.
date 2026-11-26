@@ -19,7 +19,7 @@ import numpy as np
 from . import config
 from .extractor import TextLine, extract_vector_lines
 from .layout import Layout, detect_layout
-from .preprocessing import decode_image_bytes, limit_size, process_image
+from .preprocessing import decode_image_bytes, limit_size, process_image, upscale_for_ocr
 from .schemas import QualityReport
 
 PageSource = Literal["pdf_vector", "pdf_raster", "image"]
@@ -42,6 +42,7 @@ class PreparedPage:
     quality_before: QualityReport
     quality_after: QualityReport
     warnings: list[str] = field(default_factory=list)
+    upscale: float = 1.0
 
     @property
     def width(self) -> int:
@@ -178,6 +179,16 @@ def pages_from_upload(data: bytes, filename: str, start_index: int) -> list[Prep
     kept: list[PreparedPage] = []
     for page in pages[: config.MAX_PAGES]:
         page.image = limit_size(page.image)
+        # Мелкий лист OCR читает плохо: увеличиваем и переводим геометрию в новые пиксели.
+        # Векторный PDF не трогаем — у него есть текстовый слой с точными координатами.
+        if page.source != "pdf_vector":
+            enlarged, factor = upscale_for_ocr(page.image)
+            if factor > 1.0:
+                page.image = enlarged
+                page.layout = page.layout.scaled(factor)
+                page.dpi = max(1, int(round(page.dpi * factor)))
+                page.upscale = factor
+                page.warnings = list(dict.fromkeys([*page.warnings, "small_sheet_upscaled"]))
         kept.append(page)
     return kept
 

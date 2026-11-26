@@ -37,8 +37,11 @@ from .pages import (
     pages_from_upload,
 )
 from .preprocessing import encode_data_url
+from .tables import extract_bom_rows, extract_views
 from .quality import describe
 from .schemas import (
+    BBoxPercent,
+    BomRowPayload,
     Candidate,
     EngineInfo,
     HealthResponse,
@@ -48,6 +51,7 @@ from .schemas import (
     RecognizeResponse,
     RoiRequest,
     RoiResponse,
+    SheetViewPayload,
     TitleBlock,
     Zone,
 )
@@ -172,6 +176,7 @@ def _page_payload(page: PreparedPage) -> PagePayload:
         imageDataUrl=encode_data_url(page.image),
         zones=zones or [],
         warnings=list(page.warnings),
+        upscale=page.upscale,
     )
 
 
@@ -184,6 +189,10 @@ def _page_notices(page: PreparedPage) -> list[str]:
         notices.append(f"{sheet}: штамп ГОСТ 2.104 не найден — название, код и материал введите вручную.")
     if "frame_not_found" in page.warnings:
         notices.append(f"{sheet}: рамка чертежа не найдена — обрежьте лист по краям и загрузите снова.")
+    if page.upscale > 1.0:
+        notices.append(
+            f"{sheet}: лист мелкий, увеличен в {page.upscale:g}× для распознавания — мелкий шрифт прочитан точнее."
+        )
     return notices
 
 
@@ -219,6 +228,8 @@ async def recognize(files: list[UploadFile] = File(default_factory=list)) -> Rec
         page_store.put(page)
 
     candidates: list[Candidate] = []
+    bom_rows: list[BomRowPayload] = []
+    views: list[SheetViewPayload] = []
     title_block: TitleBlock | None = None
     notices: list[str] = []
     for page in pages:
@@ -226,6 +237,29 @@ async def recognize(files: list[UploadFile] = File(default_factory=list)) -> Rec
         page_candidates = build_candidates(lines, page.layout, page.page_index)
         candidates.extend(page_candidates)
         notices.extend(_page_notices(page))
+        for row in extract_bom_rows(lines):
+            bom_rows.append(
+                BomRowPayload(
+                    pageIndex=page.page_index,
+                    position=row.position,
+                    designation=row.designation,
+                    name=row.name,
+                    quantity=row.quantity,
+                    xPercent=round((row.box.x + row.box.w / 2.0) / page.width * 100, 3),
+                    yPercent=round((row.box.y + row.box.h / 2.0) / page.height * 100, 3),
+                    bboxPercent=page.layout.to_percent(row.box),
+                )
+            )
+        for view in extract_views(lines):
+            views.append(
+                SheetViewPayload(
+                    pageIndex=page.page_index,
+                    name=view.name,
+                    xPercent=round((view.box.x + view.box.w / 2.0) / page.width * 100, 3),
+                    yPercent=round((view.box.y + view.box.h / 2.0) / page.height * 100, 3),
+                    bboxPercent=page.layout.to_percent(view.box),
+                )
+            )
         if title_block is None:
             attempt = parse_title_block(lines, page.layout, page.page_index)
             if attempt is not None:
@@ -238,6 +272,10 @@ async def recognize(files: list[UploadFile] = File(default_factory=list)) -> Rec
         )
     if not candidates:
         notices.append("Текст на листах не найден. Выделите размер вручную в «Рентгене» или введите шифр.")
+    elif not bom_rows and not views:
+        notices.append(
+            "Таблица позиций и подписи видов не найдены: шаги собраны по обозначениям на чертеже."
+        )
 
     pages_payload = [_page_payload(page) for page in pages]
     annotations = [
@@ -262,6 +300,8 @@ async def recognize(files: list[UploadFile] = File(default_factory=list)) -> Rec
         pages=pages_payload,
         titleBlock=title_block,
         candidates=candidates,
+        bomRows=bom_rows,
+        views=views,
         warnings=list(dict.fromkeys(notices)),
         page=LegacyPage(width=first.width, height=first.height, dpi=first.dpi),
         annotations=annotations,

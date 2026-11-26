@@ -54,6 +54,33 @@ class Layout:
                 result.append(Zone(kind=kind, bboxPercent=self.to_percent(box)))
         return result
 
+    def scaled(self, factor: float) -> "Layout":
+        """Копия раскладки для увеличенного листа: проценты остаются теми же."""
+        if abs(factor - 1.0) < 1e-6:
+            return self
+
+        def scale(box: Box | None) -> Box | None:
+            if box is None:
+                return None
+            return Box(
+                int(round(box.x * factor)),
+                int(round(box.y * factor)),
+                max(1, int(round(box.w * factor))),
+                max(1, int(round(box.h * factor))),
+            )
+
+        return Layout(
+            width=max(1, int(round(self.width * factor))),
+            height=max(1, int(round(self.height * factor))),
+            frame=scale(self.frame),
+            title_block=scale(self.title_block),
+            tech_req=scale(self.tech_req),
+            drawing=scale(self.drawing),
+            stamp_detected=self.stamp_detected,
+            frame_detected=self.frame_detected,
+            warnings=list(self.warnings),
+        )
+
     def to_percent(self, box: Box) -> BBoxPercent:
         return BBoxPercent(
             x=round(box.x / self.width * 100, 2),

@@ -212,7 +212,18 @@ check('lib.rs регистрирует плагины dialog и fs', libRs.inclu
 check('lib.rs не печатает листы: PDF сохраняется файлом', !libRs.includes('printed') && !libRs.includes('window.print'));
 check('lib.rs умеет тихо поднять движок из папки engine', /engine/.test(libRs) && /ikguide-vision\.exe/.test(libRs));
 check('движок стартует без окна консоли', libRs.includes('CREATE_NO_WINDOW') && libRs.includes('creation_flags'));
-check('движок поднимается в setup, а не по кнопке', libRs.includes('.setup(') && libRs.includes('spawn_local_engines'));
+check('движок поднимается в setup, а не по кнопке', libRs.includes('.setup(') && libRs.includes('start_engine'));
+
+// --- sidecar: пинг, ожидание порта и прибранный процесс ---------------------------------
+check('sidecar: пинг /health по 127.0.0.1', libRs.includes('GET /health HTTP/1.1') && libRs.includes('127, 0, 0, 1'));
+check('sidecar: ждём готовности порта, а не спим фиксированно', /fn wait_for_health\(/.test(libRs) && libRs.includes('HEALTH_TIMEOUT'));
+check('sidecar: занятый порт 8000 не мешает (запасной 8001)', libRs.includes('ENGINE_FALLBACK_PORT: u16 = 8001'));
+check('sidecar: если движок уже запущен, второй не поднимаем', /fn start_engine[^]*?engine_port\(\)\.is_some\(\)[^]*?return;/.test(libRs));
+check('sidecar: процесс запоминается для остановки', libRs.includes('static ENGINE_CHILD') && libRs.includes('fn remember_child'));
+check('sidecar: закрытие окна убивает всё дерево процессов', libRs.includes('RunEvent::Exit') && libRs.includes('stop_engine()') && libRs.includes('taskkill') && libRs.includes('"/T"'));
+check('sidecar: отсутствие движка — не падение, а честный статус', libRs.includes('fn engine_available') && libRs.toLowerCase().includes('движок распознавания не установлен'));
+check('sidecar: статус движка доступен интерфейсу', libRs.includes('#[tauri::command]') && libRs.includes('fn engine_status') && libRs.includes('generate_handler![shell_version, engine_status]'));
+check('sidecar: stdout/stderr движка не наследуются (нет мусора в консоли)', (libRs.match(/Stdio::null\(\)/g) ?? []).length >= 6);
 check('main.rs зовёт ikguide_studio_lib::run()', mainRs.includes('ikguide_studio_lib::run()'));
 check('main.rs скрывает консоль в release', mainRs.includes('windows_subsystem'));
 

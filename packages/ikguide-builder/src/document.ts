@@ -22,8 +22,10 @@ import type {
   BuildStats,
   ManualNotation,
   SkippedCandidate,
+  VisionBomRow,
   VisionCandidate,
   VisionRecognizeResponse,
+  VisionSheetView,
   VisionRegion,
   VisionTitleBlock,
 } from './types';
@@ -51,6 +53,8 @@ interface SourceItem {
   displayText: string;
   xPercent: number;
   yPercent: number;
+  /** Область обозначения на листе: из неё считается зона кропа страницы шага. */
+  bbox?: { x: number; y: number; w: number; h: number };
   confidence: number;
   confirmedByHuman: boolean;
   ambiguousOptions: string[];
@@ -86,6 +90,71 @@ function uniqueId(base: string, used: Set<string>): string {
   return id;
 }
 
+/** Прямоугольник на листе в процентах — как `cropPercent` в схеме документа. */
+interface Crop {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+interface SheetBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+const CROP_PADDING_PERCENT = 2.4;
+const MAX_BOM_STEPS = 6;
+const MAX_VIEW_STEPS = 3;
+
+function roundPercent(value: number): number {
+  return Math.round(Math.min(100, Math.max(0, value)) * 100) / 100;
+}
+
+function unionBoxes(boxes: readonly SheetBox[]): SheetBox | null {
+  const usable = boxes.filter(
+    (box) => Number.isFinite(box.x) && Number.isFinite(box.y) && box.w > 0 && box.h > 0,
+  );
+  if (usable.length === 0) {
+    return null;
+  }
+  const x0 = Math.min(...usable.map((box) => box.x));
+  const y0 = Math.min(...usable.map((box) => box.y));
+  const x1 = Math.max(...usable.map((box) => box.x + box.w));
+  const y1 = Math.max(...usable.map((box) => box.y + box.h));
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/** Зона кропа вокруг области листа: небольшой запас, чтобы обрезка не резала текст. */
+function cropAround(box: SheetBox | null, padding = CROP_PADDING_PERCENT): Crop | undefined {
+  if (!box) {
+    return undefined;
+  }
+  const x = roundPercent(box.x - padding);
+  const y = roundPercent(box.y - padding);
+  const w = roundPercent(Math.min(100 - x, Math.max(1, box.w + padding * 2)));
+  const h = roundPercent(Math.min(100 - y, Math.max(1, box.h + padding * 2)));
+  if (w < 1 || h < 1) {
+    return undefined;
+  }
+  return { x, y, w, h };
+}
+
+/** Зона шага: свои обозначения, иначе ближайший вид листа, иначе ничего. */
+function cropForEntries(
+  group: readonly StageEntry[],
+  views: readonly VisionSheetView[],
+): Crop | undefined {
+  const own = unionBoxes(group.map((entry) => entry.item.bbox).filter((box): box is SheetBox => Boolean(box)));
+  if (own) {
+    return cropAround(own, Math.max(CROP_PADDING_PERCENT, Math.min(own.w, own.h) * 0.25));
+  }
+  const view = unionBoxes(views.map((item) => item.bboxPercent));
+  return view ? cropAround(view, 6) : undefined;
+}
+
 function sourceFromCandidate(candidate: VisionCandidate): SourceItem {
   const options = candidate.ambiguousOptions.filter((option) => option.trim().length > 0).slice(0, 4);
   return {
@@ -93,6 +162,16 @@ function sourceFromCandidate(candidate: VisionCandidate): SourceItem {
     displayText: candidate.normalizedText.trim(),
     xPercent: clampPercent(candidate.xPercent),
     yPercent: clampPercent(candidate.yPercent),
+    ...(candidate.bboxPercent && candidate.bboxPercent.w > 0 && candidate.bboxPercent.h > 0
+      ? {
+          bbox: {
+            x: clampPercent(candidate.bboxPercent.x),
+            y: clampPercent(candidate.bboxPercent.y),
+            w: clampPercent(candidate.bboxPercent.w),
+            h: clampPercent(candidate.bboxPercent.h),
+          },
+        }
+      : {}),
     confidence: Math.min(1, Math.max(0, candidate.confidence)),
     confirmedByHuman: false,
     ambiguousOptions: options.length >= 2 ? options : [],
@@ -205,7 +284,40 @@ function inferMass(stamp: VisionTitleBlock | null): number | null {
   return null;
 }
 
-function buildBom(metadata: IkGuideMetadata, entries: readonly StageEntry[]): BomItem[] {
+function bomLookFor(row: VisionBomRow): Pick<BomItem, 'kind' | 'icon'> {
+  const text = `${row.designation ?? ''} ${row.name}`.toLowerCase();
+  if (/болт|винт|шпильк/.test(text)) {
+    return { kind: 'fastener', icon: 'bolt' };
+  }
+  if (/гайк/.test(text)) {
+    return { kind: 'fastener', icon: 'nut' };
+  }
+  if (/шайб/.test(text)) {
+    return { kind: 'fastener', icon: 'washer' };
+  }
+  if (/подшип/.test(text)) {
+    return { kind: 'bearing', icon: 'bearing' };
+  }
+  if (/манжет|сальник|уплотн/.test(text)) {
+    return { kind: 'seal', icon: 'seal' };
+  }
+  if (/кронштейн|скоб|планк/.test(text)) {
+    return { kind: 'purchased', icon: 'bracket' };
+  }
+  if (/датчик/.test(text)) {
+    return { kind: 'purchased', icon: 'sensor' };
+  }
+  if (/провод|кабел/.test(text)) {
+    return { kind: 'purchased', icon: 'cable' };
+  }
+  return { kind: 'purchased', icon: 'plate' };
+}
+
+function buildBom(
+  metadata: IkGuideMetadata,
+  entries: readonly StageEntry[],
+  bomRows: readonly VisionBomRow[] = [],
+): BomItem[] {
   const items: BomItem[] = [
     {
       id: 'bom-stock',
@@ -217,6 +329,19 @@ function buildBom(metadata: IkGuideMetadata, entries: readonly StageEntry[]): Bo
       note: 'Припуск на обработку 2–3 мм на сторону, кромки без трещин',
     },
   ];
+
+  bomRows.forEach((row, index) => {
+    const designation = row.designation?.trim();
+    const position = typeof row.position === 'number' && row.position > 0 ? row.position : index + 1;
+    items.push({
+      id: `bom-row-${position}`,
+      name: row.name,
+      size: designation ?? 'по таблице позиций',
+      quantity: row.quantity && row.quantity > 0 ? Math.min(999, Math.round(row.quantity)) : 1,
+      ...bomLookFor(row),
+      note: `Позиция ${position}${designation && /гост/i.test(designation) ? `, ${designation}` : ''}: сверьте номер на поле чертежа`,
+    });
+  });
 
   if (entries.some((entry) => entry.result.kind === 'weld')) {
     items.push({
@@ -258,22 +383,82 @@ function stageIntro(stage: StageId, metadata: IkGuideMetadata, stamp: VisionTitl
   }
 }
 
+interface StepPiece {
+  stageId: StageId | null;
+  title: string;
+  workerText: string;
+  estimatedMinutes: number;
+  highlights: Highlight[];
+  antiError: GuideStep['antiError'];
+  criticalChecks: CriticalCheck[];
+  drawingRefs: string[];
+  crop?: Crop;
+}
+
+/** Шаги комплектности: каждая прочитанная строка таблицы позиций — что взять и сколько. */
+function bomPieces(bomRows: readonly VisionBomRow[]): StepPiece[] {
+  return bomRows.slice(0, MAX_BOM_STEPS).map((row) => {
+    const quantity = row.quantity && row.quantity > 0 ? row.quantity : null;
+    const designation = row.designation?.trim();
+    const position = typeof row.position === 'number' && row.position > 0 ? row.position : null;
+    const parts = [
+      position
+        ? `Позиция ${position} по таблице позиций: возьмите «${row.name}»${designation ? ` (${designation})` : ''}${quantity ? ` — ${quantity} шт.` : ''}.`
+        : `Возьмите по таблице позиций «${row.name}»${designation ? ` (${designation})` : ''}${quantity ? ` — ${quantity} шт.` : ''}.`,
+      'Найдите этот номер позиции на поле чертежа и сверьте деталь с обозначением — похожие крепёж и кронштейны легко перепутать.',
+      quantity && quantity > 1
+        ? `Проверьте количество: в комплекте должно быть ${quantity} шт., недостача обнаруживается только на сборке.`
+        : 'Проверьте, что деталь без заусенцев, трещин и следов коррозии.',
+    ];
+    return {
+      stageId: null,
+      title: position ? `Комплектность · позиция ${position}: ${row.name}` : `Комплектность · ${row.name}`,
+      workerText: parts.join(' ').replace(/\s{2,}/g, ' ').trim(),
+      estimatedMinutes: Math.max(2, Math.min(12, 2 + (quantity ?? 1))),
+      highlights: [{ shapeId: 'plate', label: designation ?? row.name, tone: 'accent' as const }],
+      antiError: null,
+      criticalChecks: [],
+      drawingRefs: [],
+      crop: cropAround(row.bboxPercent, 2),
+    };
+  });
+}
+
+/** Ориентиры на листе: «Спереди», «Сбоку», «Сверху» — куда смотреть при работе. */
+function viewPieces(views: readonly VisionSheetView[]): StepPiece[] {
+  return views.slice(0, MAX_VIEW_STEPS).map((view) => ({
+    stageId: null,
+    title: `Ориентир на листе: вид ${view.name}`,
+    workerText: [
+      `На чертеже подписан вид «${view.name}» — сверяйтесь с ним, а не с объёмным представлением:`,
+      'на виде видны только те кромки и отверстия, которые действительно есть на детали.',
+      'Найдите подпись на листе и держите её перед глазами до конца этого перехода.',
+    ]
+      .join(' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim(),
+    estimatedMinutes: 2,
+    highlights: [{ shapeId: 'plate', label: `Вид ${view.name}`, tone: 'accent' as const }],
+    antiError: null,
+    criticalChecks: [],
+    drawingRefs: [],
+    crop: cropAround(view.bboxPercent, 6),
+  }));
+}
+
 function buildSteps(
   entriesByStage: ReadonlyMap<StageId, StageEntry[]>,
   qcDrafts: readonly QcDraft[],
   metadata: IkGuideMetadata,
   stamp: VisionTitleBlock | null,
   warnings: string[],
+  sheet: { bomRows: readonly VisionBomRow[]; views: readonly VisionSheetView[] },
 ): { steps: GuideStep[]; stepNumberByStage: Map<StageId, number> } {
   const activeStages = STAGES.filter(
     (stage) => stage.id === 'preparation' || stage.id === 'control' || (entriesByStage.get(stage.id)?.length ?? 0) > 0,
   );
 
-  const stepNumberByStage = new Map<StageId, number>();
-  const steps: GuideStep[] = activeStages.map((stage, index) => {
-    const number = index + 1;
-    stepNumberByStage.set(stage.id, number);
-
+  const stagePieces: StepPiece[] = activeStages.map((stage) => {
     const group = entriesByStage.get(stage.id) ?? [];
     const parts: string[] = [stageIntro(stage.id, metadata, stamp)];
 
@@ -333,7 +518,7 @@ function buildSteps(
 
     if (stage.id === 'control' && criticalChecks.length === 0) {
       criticalChecks.push({
-        id: `check-${number}-visual`,
+        id: `check-${stage.id}-visual`,
         label: 'Внешний вид и заусенцы',
         nominal: 'Поверхность по чертежу',
         acceptance: 'Заусенцы сняты, острые кромки притуплены, следов коррозии нет',
@@ -349,16 +534,51 @@ function buildSteps(
     const workerText = `${parts.filter((part) => part.trim().length > 0).join(' ')}`.replace(/\s{2,}/g, ' ').trim();
 
     return {
-      id: `step-${number}`,
-      number,
+      stageId: stage.id,
       title: stage.title,
       workerText: workerText.length >= 3 ? workerText : `${stage.title}: следуйте указаниям мастера.`,
       estimatedMinutes,
-      illustration: { illustrationId: 'generic-step', highlight: highlights, arrows: [] },
+      highlights,
       antiError,
       criticalChecks,
       drawingRefs: group.map((entry) => entry.annotationId),
+      crop: cropForEntries(group, sheet.views),
     };
+  });
+
+  // Порядок для цеха: подготовка → что взять (таблица позиций) → куда смотреть (виды) → работа.
+  const ordered: StepPiece[] = [];
+  stagePieces.forEach((piece) => {
+    ordered.push(piece);
+    if (piece.stageId === 'preparation') {
+      ordered.push(...bomPieces(sheet.bomRows), ...viewPieces(sheet.views));
+    }
+  });
+
+  const steps: GuideStep[] = ordered.map((piece, index) => {
+    const number = index + 1;
+    const step: GuideStep = {
+      id: `step-${number}`,
+      number,
+      title: piece.title,
+      workerText: piece.workerText,
+      estimatedMinutes: piece.estimatedMinutes,
+      illustration: { illustrationId: 'generic-step', highlight: piece.highlights, arrows: [] },
+      antiError: piece.antiError,
+      criticalChecks: piece.criticalChecks,
+      drawingRefs: piece.drawingRefs,
+    };
+    if (piece.crop) {
+      step.cropPercent = piece.crop;
+    }
+    return step;
+  });
+
+  const stepNumberByStage = new Map<StageId, number>();
+  ordered.forEach((piece, index) => {
+    if (piece.stageId && !stepNumberByStage.has(piece.stageId)) {
+      stepNumberByStage.set(piece.stageId, index + 1);
+    }
   });
 
   return { steps, stepNumberByStage };
@@ -397,6 +617,7 @@ function assemble(
   viewId: string,
   incomingWarnings: readonly string[],
   skipped: SkippedCandidate[],
+  sheet: { bomRows: readonly VisionBomRow[]; views: readonly VisionSheetView[] } = { bomRows: [], views: [] },
 ): BuildResult {
   const warnings = [...incomingWarnings];
   const annotations: XrayAnnotation[] = [];
@@ -469,7 +690,7 @@ function assemble(
     .filter((draft): draft is QcDraft => draft !== null);
   const qcChecklist = buildQc(qcSuggestions, metadata);
 
-  const { steps, stepNumberByStage } = buildSteps(entriesByStage, qcSuggestions, metadata, stamp, warnings);
+  const { steps, stepNumberByStage } = buildSteps(entriesByStage, qcSuggestions, metadata, stamp, warnings, sheet);
 
   const toolDrafts: ToolDraft[] = entries.flatMap((entry) => {
     const stage = stageForKind(entry.result.kind);
@@ -493,7 +714,7 @@ function assemble(
   }
   const tools = toGuideTools(mergedTools, stepNumberByStage, controlStageNumber);
 
-  const bom = buildBom(metadata, entries);
+  const bom = buildBom(metadata, entries, sheet.bomRows);
   const uncertainCount = annotations.filter(
     (annotation) => annotation.confidence < CONFIDENCE_THRESHOLD && !annotation.confirmedByHuman,
   ).length;
@@ -601,6 +822,20 @@ export function buildGuideFromVision(response: VisionRecognizeResponse, options:
     });
   });
 
+  if (response.bomRows && response.bomRows.length > 0) {
+    // Строки таблицы позиций превращаются в шаги комплектности — об этом стоит сказать вслух.
+    const positions = response.bomRows
+      .map((row) => (typeof row.position === 'number' && row.position > 0 ? row.position : null))
+      .filter((position): position is number => position !== null);
+    if (positions.length > 0) {
+      skipped.push({
+        text: `таблица позиций: ${positions.map((position) => `поз. ${position}`).join(', ')}`,
+        reason: 'bom_row',
+        confidence: 1,
+      });
+    }
+  }
+
   return assemble(
     capItems(items, limit, skipped),
     options,
@@ -608,6 +843,7 @@ export function buildGuideFromVision(response: VisionRecognizeResponse, options:
     response.pages?.[0]?.pageId ?? 'sheet-1',
     response.warnings ?? [],
     skipped,
+    { bomRows: response.bomRows ?? [], views: response.views ?? [] },
   );
 }
 

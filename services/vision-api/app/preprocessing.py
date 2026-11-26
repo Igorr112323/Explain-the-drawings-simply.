@@ -205,6 +205,40 @@ def clean_page(image: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR)
 
 
+def upscale_for_ocr(image: np.ndarray) -> tuple[np.ndarray, float]:
+    """Увеличивает мелкий лист в 2–3 раза и подчёркивает штрихи.
+
+    Мелкий шрифт таблицы позиций и подписи видов на листе уже 1400 px по ширине для OCR
+    нечитаем: интерполяция кубиком плюс аккуратный unsharp возвращают контуры букв.
+    Возвращает (лист, коэффициент) — коэффициент нужен, чтобы честно пересчитать геометрию.
+    """
+    if image is None or image.size == 0:
+        return image, 1.0
+    height, width = image.shape[:2]
+    if width <= 0 or height <= 0 or width >= config.SMALL_SHEET_WIDTH:
+        return image, 1.0
+
+    factor = min(
+        config.UPSCALE_FACTOR_MAX,
+        max(config.UPSCALE_FACTOR_MIN, config.SMALL_SHEET_WIDTH / float(width)),
+    )
+    # Не выходим за рабочий предел: OCR на 4000 px по ширине считается в разы дольше.
+    factor = min(factor, config.MAX_WORKING_SIDE / float(width))
+    if factor <= 1.05:
+        return image, 1.0
+
+    enlarged = cv2.resize(
+        image,
+        None,
+        fx=factor,
+        fy=factor,
+        interpolation=cv2.INTER_CUBIC,
+    )
+    blurred = cv2.GaussianBlur(enlarged, (0, 0), 1.2)
+    sharpened = cv2.addWeighted(enlarged, 1.0 + config.UPSCALE_SHARPEN_AMOUNT, blurred, -config.UPSCALE_SHARPEN_AMOUNT, 0)
+    return sharpened, round(factor, 3)
+
+
 def process_image(image: np.ndarray) -> ProcessedImage:
     """Full preprocessing for photos and scans. Layout/OCR always work on the cleaned version."""
     limited = limit_size(image)

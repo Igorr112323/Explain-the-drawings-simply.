@@ -67,11 +67,33 @@ def test_recognize_vector_pdf(client, vector_pdf):
         assert candidate["region"] in {"field", "title_block", "tech_req"}
         assert candidate["bboxPixels"]["w"] > 0
 
+    assert page["upscale"] == 1.0
+    assert payload["bomRows"] == [] and payload["views"] == []
+
     # Stage-1 compatibility: flat page + annotation list are still present.
     assert payload["page"]["width"] == page["width"]
     assert len(payload["annotations"]) == len(payload["candidates"])
     assert payload["annotations"][0]["kind"] == "other"
     assert all(len(annotation["bbox"]) == 4 for annotation in payload["annotations"])
+
+
+def test_recognize_reads_the_position_table(client, bom_pdf):
+    payload = _post_files(client, [("sheet.pdf", bom_pdf, "application/pdf")]).json()
+
+    rows = payload["bomRows"]
+    assert [(row["position"], row["designation"], row["name"], row["quantity"]) for row in rows] == [
+        (5, "АБВ.301.12", "Ручка жаровни", 2),
+        (6, "АБВ.301.13", "Кронштейн", 1),
+        (7, "ГОСТ 7798-70", "Болт М8", 4),
+    ]
+    for row in rows:
+        assert 0 <= row["xPercent"] <= 100 and 0 <= row["yPercent"] <= 100
+        assert 0 < row["bboxPercent"]["w"] <= 100
+        assert row["pageIndex"] == 0
+
+    views = payload["views"]
+    assert [view["name"] for view in views] == ["Спереди", "Сбоку", "Сверху"]
+    assert all(view["bboxPercent"]["w"] > 0 for view in views)
 
 
 def test_recognize_multipage_pdf(client, spec_pdf):

@@ -16,6 +16,7 @@ if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
 from synthetic import (  # noqa: E402  (path must be configured first)
+    build_bom_sheet_pdf,
     build_vector_pdf,
     multipage_pdf,
     photo_of,
@@ -37,6 +38,11 @@ def photo():
 @pytest.fixture(scope="session")
 def vector_pdf() -> bytes:
     return build_vector_pdf()
+
+
+@pytest.fixture(scope="session")
+def bom_pdf() -> bytes:
+    return build_bom_sheet_pdf()
 
 
 @pytest.fixture(scope="session")

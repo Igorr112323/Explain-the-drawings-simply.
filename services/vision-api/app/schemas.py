@@ -71,6 +71,7 @@ class PagePayload(BaseModel):
     imageDataUrl: str
     zones: list[Zone] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    upscale: float = Field(default=1.0, ge=1.0, le=4.0, description="во сколько раз лист увеличен перед OCR")
 
 
 class Candidate(BaseModel):
@@ -119,6 +120,29 @@ class TitleBlock(BaseModel):
     rawLines: list[str] = Field(default_factory=list)
 
 
+class BomRowPayload(BaseModel):
+    """Строка таблицы позиций на поле чертежа: что взять и сколько."""
+
+    pageIndex: int = Field(default=0, ge=0)
+    position: int | None = Field(default=None, ge=0)
+    designation: str | None = None
+    name: str = Field(min_length=1)
+    quantity: int | None = Field(default=None, ge=0)
+    xPercent: float = Field(ge=0, le=100)
+    yPercent: float = Field(ge=0, le=100)
+    bboxPercent: BBoxPercent
+
+
+class SheetViewPayload(BaseModel):
+    """Подпись вида на листе: «Спереди», «Сбоку», «Сверху», «Изометрия», «Разрез А-А»."""
+
+    pageIndex: int = Field(default=0, ge=0)
+    name: str = Field(min_length=1)
+    xPercent: float = Field(ge=0, le=100)
+    yPercent: float = Field(ge=0, le=100)
+    bboxPercent: BBoxPercent
+
+
 class EngineInfo(BaseModel):
     name: str
     version: str
@@ -134,6 +158,8 @@ class RecognizeResponse(BaseModel):
     pages: list[PagePayload]
     titleBlock: TitleBlock | None = None
     candidates: list[Candidate] = Field(default_factory=list)
+    bomRows: list[BomRowPayload] = Field(default_factory=list)
+    views: list[SheetViewPayload] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     # --- stage-1 compatibility ---------------------------------------------------------
     page: LegacyPage | None = None

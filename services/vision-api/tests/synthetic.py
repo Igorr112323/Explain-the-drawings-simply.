@@ -261,6 +261,57 @@ def build_vector_pdf(scale: str = "1:2") -> bytes:
     return buffer.getvalue()
 
 
+# Таблица позиций на поле чертежа: позиция / обозначение / наименование / количество.
+BOM_HEADER = ("ПОЗИЦИЯ", "ОБОЗНАЧЕНИЕ", "НАИМЕНОВАНИЕ", "КОЛ-ВО")
+BOM_ROWS = (
+    (5, "АБВ.301.12", "Ручка жаровни", 2),
+    (6, "АБВ.301.13", "Кронштейн", 1),
+    (7, "ГОСТ 7798-70", "Болт М8", 4),
+)
+BOM_COLUMNS_MM = (36.0, 56.0, 100.0, 176.0)
+SHEET_VIEWS = ("Спереди", "Сбоку", "Сверху")
+
+
+def build_bom_sheet_pdf() -> bytes:
+    """Векторный лист с таблицей позиций и подписями видов: у текста точные координаты."""
+    width_pt, height_pt = A4_W_MM / 25.4 * 72, A4_H_MM / 25.4 * 72
+    document = pymupdf.open()
+    page = document.new_page(width=width_pt, height=height_pt)
+
+    def mm(value: float) -> float:
+        return value / 25.4 * 72
+
+    def put(x_mm: float, y_mm: float, text: str, size: float = 7.0) -> None:
+        page.insert_text(
+            (mm(x_mm), mm(y_mm)),
+            text,
+            fontsize=size,
+            fontname="dejavu",
+            fontfile=str(FONT_REGULAR),
+            color=(0, 0, 0),
+        )
+
+    frame = pymupdf.Rect(mm(LEFT_MARGIN_MM), mm(MARGIN_MM), width_pt - mm(MARGIN_MM), height_pt - mm(MARGIN_MM))
+    page.draw_rect(frame, color=(0, 0, 0), width=0.8)
+
+    for text, x_mm in zip(BOM_HEADER, BOM_COLUMNS_MM):
+        put(x_mm, 120.0, text)
+    for index, (position, designation, name, quantity) in enumerate(BOM_ROWS):
+        y = 133.0 + index * 9.0
+        put(BOM_COLUMNS_MM[0], y, str(position))
+        put(BOM_COLUMNS_MM[1], y, designation)
+        put(BOM_COLUMNS_MM[2], y, name)
+        put(BOM_COLUMNS_MM[3], y, str(quantity))
+
+    for text, x_mm in zip(SHEET_VIEWS, (50.0, 130.0, 210.0)):
+        put(x_mm, 60.0, text, size=9.0)
+
+    buffer = io.BytesIO()
+    document.save(buffer)
+    document.close()
+    return buffer.getvalue()
+
+
 def scanned_pdf(dpi: int = 200) -> bytes:
     """A PDF without a text layer: the page is a single raster image (a scan)."""
     image = render_drawing(dpi)

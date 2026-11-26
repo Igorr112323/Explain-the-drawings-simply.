@@ -20,6 +20,14 @@ PDF_PREVIEW_DPI = 140
 MAX_WORKING_SIDE = 2600
 MAX_DATA_URL_SIDE = 1700
 
+# --- upscale of small sheets -----------------------------------------------------------
+# Фото с телефона и старые копии часто мельче 1400 px по ширине: мелкий шрифт (таблица
+# позиций, подписи видов) на них не читается. Такие листы увеличиваем в 2–3 раза.
+SMALL_SHEET_WIDTH = 1400
+UPSCALE_FACTOR_MIN = 2.0
+UPSCALE_FACTOR_MAX = 3.0
+UPSCALE_SHARPEN_AMOUNT = 0.55
+
 # --- quality gates (0..255 grayscale) -------------------------------------------------
 DARK_MEAN = 95.0
 BRIGHT_MEAN = 252.0
