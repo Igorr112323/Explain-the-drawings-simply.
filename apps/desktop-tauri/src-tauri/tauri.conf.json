@@ -33,8 +33,7 @@
   "bundle": {
     "active": true,
     "targets": [
-      "nsis",
-      "msi"
+      "nsis"
     ],
     "icon": [
       "icons/32x32.png",
@@ -54,10 +53,12 @@
       "nsis": {
         "installMode": "currentUser",
         "languages": [
-          "Russian",
-          "English"
+          "Russian"
         ],
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "template": "nsis/installer.nsi",
+        "headerImage": "nsis/nsis-header.bmp",
+        "sidebarImage": "nsis/nsis-sidebar.bmp"
       }
     }
   }

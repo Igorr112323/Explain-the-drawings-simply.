@@ -124,6 +124,82 @@ for (const icon of tauriConf.bundle?.icon ?? []) {
   }
 }
 
+/* ------------------------------------------------- Установщик NSIS (минимализм) */
+
+section('Установщик NSIS');
+
+const nsis = tauriConf.bundle?.windows?.nsis ?? {};
+const nsisDir = join(tauriDir, 'src-tauri/nsis');
+check('bundle.targets — только nsis (MSI не собираем)', JSON.stringify(tauriConf.bundle?.targets) === JSON.stringify(['nsis']), JSON.stringify(tauriConf.bundle?.targets));
+check('nsis.installMode = currentUser', nsis.installMode === 'currentUser', nsis.installMode);
+check('nsis.languages = ["Russian"]', JSON.stringify(nsis.languages) === JSON.stringify(['Russian']), JSON.stringify(nsis.languages));
+check('nsis.displayLanguageSelector = false', nsis.displayLanguageSelector === false, nsis.displayLanguageSelector);
+check('nsis.template указывает на nsis/installer.nsi', nsis.template === 'nsis/installer.nsi', nsis.template);
+check('nsis.headerImage = nsis/nsis-header.bmp', nsis.headerImage === 'nsis/nsis-header.bmp', nsis.headerImage);
+check('nsis.sidebarImage = nsis/nsis-sidebar.bmp', nsis.sidebarImage === 'nsis/nsis-sidebar.bmp', nsis.sidebarImage);
+check('иконка установщика не переопределена (остаётся иконка приложения)', nsis.installerIcon === undefined, nsis.installerIcon);
+
+/** Ширина, высота и битность BMP из заголовка файла — NSIS принимает только 24-bit. */
+function bmpInfo(path) {
+  if (!existsSync(path)) {
+    return null;
+  }
+  const bytes = readFileSync(path);
+  if (bytes.length < 54 || bytes.subarray(0, 2).toString('ascii') !== 'BM') {
+    return null;
+  }
+  return {
+    width: bytes.readInt32LE(18),
+    height: bytes.readInt32LE(22),
+    bits: bytes.readUInt16LE(28),
+    compression: bytes.readUInt32LE(30),
+  };
+}
+
+const sidebar = bmpInfo(join(nsisDir, 'nsis-sidebar.bmp'));
+check('nsis-sidebar.bmp существует', Boolean(sidebar));
+check('nsis-sidebar.bmp — 164×314, 24-bit, без сжатия', Boolean(sidebar && sidebar.width === 164 && sidebar.height === 314 && sidebar.bits === 24 && sidebar.compression === 0), JSON.stringify(sidebar));
+const header = bmpInfo(join(nsisDir, 'nsis-header.bmp'));
+check('nsis-header.bmp существует', Boolean(header));
+check('nsis-header.bmp — 150×57, 24-bit, без сжатия', Boolean(header && header.width === 150 && header.height === 57 && header.bits === 24 && header.compression === 0), JSON.stringify(header));
+
+const templatePath = join(nsisDir, 'installer.nsi');
+const templateExists = existsSync(templatePath);
+check('nsis/installer.nsi существует', templateExists);
+if (templateExists) {
+  const nsi = readFileSync(templatePath, 'utf8');
+  check('  шаблон подключает MUI2', nsi.includes('!include MUI2.nsh'));
+  check('  шаблон включает XPStyle и DPI-awareness', nsi.includes('XPStyle on') && nsi.includes('ManifestDPIAware true'));
+  check('  плоский белый фон (MUI_BGCOLOR) и чернильный текст', nsi.includes('!define MUI_BGCOLOR "FFFFFF"') && nsi.includes('!define MUI_TEXTCOLOR "1C1C1E"'));
+  check('  прозрачный фон текста шапки', nsi.includes('!define MUI_HEADER_TRANSPARENT_TEXT'));
+  check('  SetCtlColors для страниц Welcome/Directory/InstFiles/Finish', ['FlatWelcome', 'FlatDirectory', 'FlatInstFiles', 'FlatFinish'].every((fn) => nsi.includes(`Function ${fn}`)) && (nsi.match(/SetCtlColors/g) ?? []).length >= 6);
+  check('  русские заголовки страниц', nsi.includes('Установка IKGuide Studio') && nsi.includes('IKGuide Studio установлен'));
+  check(
+    '  поток мастера: приветствие → папка → установка → готово',
+    ['MUI_PAGE_WELCOME', 'MUI_PAGE_DIRECTORY', 'MUI_PAGE_INSTFILES', 'MUI_PAGE_FINISH'].every((page) => nsi.includes(`!insertmacro ${page}`)),
+  );
+  check('  страница «уже установлено» пропускается', /Function PageReinstall[^]*?Abort/.test(nsi.slice(nsi.indexOf('Function PageReinstall'), nsi.indexOf('Function PageReinstall') + 400)));
+  check('  страница выбора папки «Пуск» скрыта', /MUI_PAGE_STARTMENU Application \$AppStartMenuFolder/.test(nsi) && nsi.includes('!define MUI_PAGE_CUSTOMFUNCTION_PRE Skip\n!insertmacro MUI_PAGE_STARTMENU'));
+  // Встроенные проверки Tauri сохранены — иначе установщик потеряет WebView2 и удаление.
+  check('  сохранена проверка и установка WebView2', nsi.includes('!define WEBVIEW2APPGUID') && nsi.includes('Section WebView2'));
+  check('  сохранены ярлыки и удаление', nsi.includes('CreateOrUpdateStartMenuShortcut') && /Section Uninstall/.test(nsi));
+  check('  сохранена проверка запущенного приложения', nsi.includes('CheckIfAppIsRunning'));
+  check('  сохранены переменные шаблонизатора Tauri', ['{{product_name}}', '{{version}}', '{{installer_icon}}', '{{sidebar_image}}', '{{header_image}}', '{{install_mode}}'].every((token) => nsi.includes(token)));
+  check('  движок устанавливается вместе с приложением (resources)', !nsi.includes('cad-api'));
+  // Структурный баланс блоков: самый частый способ сломать .nsi — незакрытый блок,
+  // который makensis обнаружит только в Windows-сборке.
+  const count = (pattern) => (nsi.match(pattern) ?? []).length;
+  const balanced = [
+    [count(/^Function\s/gm), count(/^FunctionEnd\b/gm), 'Function/FunctionEnd'],
+    [count(/^Section\s/gm), count(/^SectionEnd\b/gm), 'Section/SectionEnd'],
+    [count(/^!if/gm), count(/^!endif/gm), '!if/!endif'],
+    [count(/\$\{If\}|\$\{IfNot\}/g), count(/\$\{EndIf\}/g), '${If}/${EndIf}'],
+  ];
+  for (const [open, close, label] of balanced) {
+    check(`  блоки ${label} сбалансированы (${open}/${close})`, open === close);
+  }
+}
+
 const cargo = readFileSync(join(tauriDir, 'src-tauri/Cargo.toml'), 'utf8');
 check('Cargo.toml: пакет ikguide-studio', /name\s*=\s*"ikguide-studio"/.test(cargo));
 check('Cargo.toml: Rust edition 2021', /edition\s*=\s*"2021"/.test(cargo));
