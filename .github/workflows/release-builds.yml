@@ -58,10 +58,10 @@ jobs:
         run: |
           # shell по умолчанию идёт с `-e`: без `set +e` шаг упадёт раньше отчёта.
           set +e
-          npx vitest run --reporter=default --reporter=json --outputFile=vitest.json
-          status=$?
+          npx vitest run --reporter=default --reporter=json --outputFile=vitest.json 2>&1 | tee vitest.log
+          status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
-            node scripts/ci-test-report.mjs vitest.json
+            node scripts/ci-test-report.mjs vitest.json vitest.log
           fi
           exit "$status"
 

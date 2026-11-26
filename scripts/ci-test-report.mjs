@@ -9,6 +9,20 @@
 import { existsSync, readFileSync } from 'node:fs';
 
 const reportPath = process.argv[2] ?? 'vitest.json';
+const logPath = process.argv[3] ?? 'vitest.log';
+
+/** Хвост вывода vitest: в нём бывает блок «Unhandled Errors», которого нет в JSON. */
+function printLogTail(path) {
+  if (!existsSync(path)) {
+    return;
+  }
+  const clean = readFileSync(path, 'utf8').replace(/\u001b\[[\d;]*m/g, '');
+  const marker = clean.indexOf('Unhandled Errors');
+  const block = marker >= 0 ? clean.slice(marker, marker + 1500) : clean.slice(-1500);
+  for (const line of block.split('\n').map((item) => item.trim()).filter(Boolean).slice(0, 25)) {
+    console.log(`::error title=vitest::${line.replace(/%/g, '%25')}`);
+  }
+}
 
 /** GitHub режет аннотации по строке — печатаем первые строки сообщения. */
 function emit(title, message, limit = 6) {
@@ -29,6 +43,7 @@ function emit(title, message, limit = 6) {
 
 if (!existsSync(reportPath)) {
   emit('vitest', 'Отчёт vitest не создан: тесты не запустились вовсе.');
+  printLogTail(logPath);
   process.exit(0);
 }
 
@@ -53,6 +68,19 @@ for (const file of report.testResults ?? []) {
   }
 }
 
+let reported = 0;
+for (const file of report.testResults ?? []) {
+  if (file.status === 'failed' && (!file.assertionResults || file.assertionResults.length === 0)) {
+    reported += 1;
+  }
+  reported += (file.assertionResults ?? []).filter((test) => test.status === 'failed').length;
+}
 for (const error of report.unhandledErrors ?? []) {
   emit(`vitest: необработанная ошибка ${error.name ?? ''}`.trim(), `${error.message ?? ''}\n${error.stack ?? ''}`);
+  reported += 1;
+}
+
+// Ни одного упавшего теста, но код возврата не ноль: печатаем блок ошибок из вывода.
+if (reported === 0) {
+  printLogTail(logPath);
 }
