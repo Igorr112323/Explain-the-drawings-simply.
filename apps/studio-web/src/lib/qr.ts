@@ -13,10 +13,19 @@ export function buildGuideDeepLink(doc: IkGuideDocument): string {
   return `ikguide://guide/${encodeURIComponent(doc.id)}?${params.toString()}`;
 }
 
-/** Real scannable QR code, rendered to a PNG data URL. */
-export async function createQrDataUrl(text: string): Promise<string> {
+/**
+ * Real scannable QR code, rendered to a PNG data URL.
+ *
+ * Long links (a compressed instruction, ~2.9 KB) only fit a version-40 code with the lowest error
+ * correction level, so the level drops automatically once the payload gets big.
+ */
+export async function createQrDataUrl(
+  text: string,
+  options: { errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H' } = {},
+): Promise<string> {
+  const level = options.errorCorrectionLevel ?? (text.length > 1200 ? 'L' : 'M');
   return QRCode.toDataURL(text, {
-    errorCorrectionLevel: 'M',
+    errorCorrectionLevel: level,
     margin: 1,
     width: 640,
     color: {

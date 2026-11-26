@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Цеховой сервер (vision-api :8000, cad-api :8001, статика :5173) работает по HTTP в локальной
+  сети, без сертификата. Android по умолчанию запрещает cleartext, поэтому разрешаем его — но
+  осознанно и только здесь, в приложении цеха, а не в браузере рабочего.
+  subnet-паттерны (192.168.*.* / 10.*.*.*) в network-security-config не поддерживаются: это список
+  доменов, а не диапазонов IP. Поэтому cleartext разрешён базовой конфигурацией, а типовые адреса
+  (эмулятор, localhost, шлюз цеха) перечислены явно, чтобы их было видно в ревью.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <!-- 10.0.2.2 — адрес хост-машины из эмулятора Android Studio. -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <!-- Типовой шлюз цеховой сети. -->
+        <domain includeSubdomains="false">192.168.1.1</domain>
+    </domain-config>
+</network-security-config>

@@ -1,0 +1,241 @@
+name: Release builds
+
+# Здесь и только здесь появляются настоящие .exe и .apk: в песочнице разработки нет ни Rust, ни JDK,
+# ни Android SDK. Запуск — вручную (Actions → Release builds → Run workflow) или тегом v1.0.0:
+# тег дополнительно прикрепляет собранные файлы к GitHub Release.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия для имени файлов (например, 1.0.0)'
+        required: false
+        default: '1.0.0'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '20'
+  # Необязательный ключ подписи release-APK. Без него собирается debug-APK, и workflow не падает.
+  KEYSTORE_BASE64: ${{ secrets.IKGUIDE_KEYSTORE_BASE64 }}
+  KEYSTORE_PASSWORD: ${{ secrets.IKGUIDE_KEYSTORE_PASSWORD }}
+  KEY_ALIAS: ${{ secrets.IKGUIDE_KEY_ALIAS }}
+  KEY_PASSWORD: ${{ secrets.IKGUIDE_KEY_PASSWORD }}
+
+jobs:
+  # ---------------------------------------------------------------- Windows .exe
+  build-windows-exe:
+    name: Windows .exe (Tauri v2)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Rust stable (MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Кэш cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop-tauri/src-tauri -> target
+
+      - name: Зависимости веб-части
+        run: npm ci
+
+      - name: Собрать пакеты и веб-бандл
+        run: npm run build
+
+      - name: Поставить Tauri CLI
+        run: npm install --prefix apps/desktop-tauri --no-audit --no-fund
+
+      - name: Проверить конфигурацию Tauri
+        run: node scripts/check-native-configs.mjs
+
+      - name: Собрать .exe (NSIS + MSI)
+        run: npm --prefix apps/desktop-tauri run build -- --bundles nsis,msi
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ''
+
+      - name: Собрать переносимый бинарник
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Copy-Item "apps/desktop-tauri/src-tauri/target/release/ikguide-studio.exe" "artifacts/ikguide-studio-windows.exe"
+          Get-ChildItem "apps/desktop-tauri/src-tauri/target/release/bundle/nsis/*.exe" | ForEach-Object { Copy-Item $_.FullName "artifacts/ikguide-studio-setup.exe" }
+        shell: pwsh
+
+      - name: Артефакт ikguide-studio-windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: ikguide-studio-windows
+          path: artifacts/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Прикрепить к Release (только по тегу)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.exe
+          fail_on_unmatched_files: false
+
+  # ---------------------------------------------------------------- Android .apk
+  build-android-apk:
+    name: Android .apk (Capacitor v6)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Java 17 (temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Зависимости веб-части
+        run: npm ci
+
+      - name: Собрать веб-бандл для WebView
+        run: npm run build
+
+      - name: Зависимости Capacitor
+        run: npm install --prefix apps/mobile-capacitor --no-audit --no-fund
+
+      - name: Синхронизировать с Android-проектом
+        run: npm --prefix apps/mobile-capacitor run sync
+
+      - name: Проверить конфигурацию Android-проекта
+        run: node scripts/check-native-configs.mjs
+
+      - name: Собрать debug APK
+        working-directory: apps/mobile-capacitor/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Собрать подписанный release APK (если есть секреты)
+        if: env.KEYSTORE_BASE64 != ''
+        working-directory: apps/mobile-capacitor/android
+        continue-on-error: true
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > app/ikguide-release.jks
+          ./gradlew assembleRelease --no-daemon \
+            -Pandroid.injected.signing.store.file="$PWD/app/ikguide-release.jks" \
+            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+
+      - name: Собрать артефакты
+        run: |
+          mkdir -p artifacts
+          cp apps/mobile-capacitor/android/app/build/outputs/apk/debug/app-debug.apk artifacts/ikguide-worker-android.apk
+          if [ -f apps/mobile-capacitor/android/app/build/outputs/apk/release/app-release.apk ]; then
+            cp apps/mobile-capacitor/android/app/build/outputs/apk/release/app-release.apk artifacts/ikguide-worker-android-release.apk
+          fi
+          ls -la artifacts
+
+      - name: Артефакт ikguide-worker-android
+        uses: actions/upload-artifact@v4
+        with:
+          name: ikguide-worker-android
+          path: artifacts/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Прикрепить к Release (только по тегу)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.apk
+          fail_on_unmatched_files: false
+
+  # ------------------------------------------------- Цеховой сервер (архив)
+  build-portable-backend:
+    name: Цеховой сервер (архив для Windows/ПК)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Собрать архив с сервисами и скриптами запуска
+        run: |
+          mkdir -p workshop-package
+          cp -r services/vision-api services/cad-api workshop-package/
+          rm -rf workshop-package/*/.venv workshop-package/*/__pycache__ workshop-package/*/.pytest_cache
+          mkdir -p workshop-package/scripts
+          cp scripts/start-workshop-servers.bat scripts/start-workshop-servers.sh workshop-package/scripts/
+          cp README.md workshop-package/README.md
+          cat > workshop-package/КАК-ЗАПУСТИТЬ.txt <<'TXT'
+          ИК-Гайд: цеховой сервер
+          ========================
+
+          1. Установите Python 3.11 с python.org (обязательно отметьте «Add python.exe to PATH»).
+          2. Двойной щелчок по scripts\start-workshop-servers.bat — при первом запуске добавьте
+             аргумент install: start-workshop-servers.bat install
+          3. Скопируйте адрес, который напечатает окно (например http://192.168.1.50:8000),
+             и впишите его на планшете в «Настройки и подключение».
+          4. Антивирус может спросить про прослушивание портов 8000 и 8001 — разрешите для
+             локальной сети.
+
+          Без интернета сервисы работают полностью: распознавание чертежей, 3D-модели и схемы
+          выполняются на этом компьютере.
+          TXT
+          cd workshop-package && zip -r ../ikguide-workshop-backend.zip . && cd ..
+          ls -la ikguide-workshop-backend.zip
+
+      - name: Артефакт ikguide-workshop-backend
+        uses: actions/upload-artifact@v4
+        with:
+          name: ikguide-workshop-backend
+          path: ikguide-workshop-backend.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Прикрепить к Release (только по тегу)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ikguide-workshop-backend.zip
+          fail_on_unmatched_files: false
+
+  # ----------------------------------------------------------------- Сводка
+  summary:
+    name: Итог
+    needs: [build-windows-exe, build-android-apk, build-portable-backend]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Сводка релиза
+        run: |
+          {
+            echo "## Сборки ИК-Гайд"
+            echo ""
+            echo "| Что | Статус |"
+            echo "| --- | --- |"
+            echo "| Windows .exe (Tauri v2) | ${{ needs.build-windows-exe.result }} |"
+            echo "| Android .apk (Capacitor v6) | ${{ needs.build-android-apk.result }} |"
+            echo "| Цеховой сервер (архив) | ${{ needs.build-portable-backend.result }} |"
+            echo ""
+            echo "Готовые файлы — в разделе **Artifacts** этого запуска (и в Release, если запуск по тегу)."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -4,6 +4,7 @@ import { useStudio } from '../../state/studio';
 import { readTextFile } from '../../lib/download';
 import { WorkerHeader, SectionTitle } from './WorkerChrome';
 import { QrDialog } from '../common/QrDialog';
+import { OfflineLibrary } from '../common/OfflineLibrary';
 import { BomGlyph } from '../common/Glyphs';
 
 export function HomeScreen() {
@@ -46,6 +47,12 @@ export function HomeScreen() {
   return (
     <div className="screen screen-home">
       <WorkerHeader title="Мои инструкции" subtitle="Чертёж → понятная инструкция за пару минут" />
+
+      <SectionTitle>Доступно офлайн</SectionTitle>
+      <OfflineLibrary
+        variant="worker"
+        emptyHint="Пока пусто: отсканируйте QR, откройте файл .ikguide.json или возьмите одну из встроенных инструкций — сохранённые останутся на планшете без Wi-Fi."
+      />
 
       <SectionTitle>Недавние</SectionTitle>
       <div className="doc-cards">
@@ -144,6 +151,13 @@ export function HomeScreen() {
         </button>
         <button type="button" className="capsule-action" onClick={() => setQrOpen(true)}>
           ▦ QR-код
+        </button>
+        <button
+          type="button"
+          className="capsule-action"
+          onClick={() => dispatch({ type: 'SET_SCANNER_OPEN', open: true })}
+        >
+          ▣ Сканер
         </button>
         <label className="capsule-action capsule-file">
           ↧ Инструкция

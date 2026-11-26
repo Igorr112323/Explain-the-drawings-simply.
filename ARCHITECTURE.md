@@ -295,26 +295,121 @@ POST /v1/cad/render-view → {svg, azimuth, elevation, triangles}
 
 ---
 
-## 6. Этап 4 — упаковка `.exe` и `.apk`
+## 6. Этап 4 — упаковка `.exe` и `.apk` (реализован)
 
-### Windows `.exe` — Tauri 2
-- Rust-оболочка, `frontendDist` = `apps/studio-web/dist`.
-- Плагины: `dialog` (открыть/сохранить `.ikguide.json`), `fs`, `printer` (печать A4 без браузера), `updater`,
-  `single-instance`.
-- Sidecar: локальный OCR/STEP-сервис (PyInstaller) — офлайн-цеха без интернета.
-- Подпись кода (EV-сертификат) и MSI/NSIS-инсталлятор; автообновление через собственный канал.
+Один и тот же бандл `apps/studio-web/dist` живёт в трёх оболочках; различия между ними собраны в одном
+модуле — `apps/studio-web/src/lib/runtimeConfig.ts`.
 
-### Android `.apk` — Capacitor 6
-- `npx cap add android`, `webDir: dist`.
-- Плагины: `camera` (съёмка чертежа), `filesystem` (офлайн-кэш документов), `barcode-scanner` (цеховой QR),
-  `text-to-speech` (нативный TTS вместо Web Speech API, если WebView без русского голоса).
-- Офлайн-first: `.ikguide.json` хранится в IndexedDB/SQLite, синхронизация — этап 5.
-- Сборка: Gradle + подпись keystore в CI (Linux-раннер с Android SDK), артефакт `app-release.apk`.
+| Оболочка | Определение | Стартовый режим | Базовый URL сервисов |
+| --- | --- | --- | --- |
+| Браузер / dev / preview | ни `__TAURI__`, ни `Capacitor.isNativePlatform()` | Рабочий | `''` → относительные `/v1/...`, прокси Vite |
+| Windows `.exe` | `window.__TAURI_INTERNALS__` / `__TAURI__` | Инженер (Freeform) | сохранённый адрес, иначе `http://127.0.0.1:8000` / `:8001` |
+| Android `.apk` | `window.Capacitor.isNativePlatform()` | Рабочий | сохранённый адрес, иначе те же локальные порты (в цехе — LAN-IP ноутбука) |
 
-### Общие требования к оболочкам
-- Никаких абсолютных URL: `base: './'` и относительные `fetch`.
-- Размер бандла: текущий `~375 kB` JS (gzip `~118 kB`) — бюджет до 600 kB до подключения three.js.
-- Проверка печати: в Tauri — нативный драйвер, в Android — «Печать в PDF» через системный диалог.
+`joinUrl(base, path)` — единственное место, где склеивается адрес: `sanitizeBaseUrl` принимает только
+абсолютные `http(s)`-адреса, поэтому опечатка вроде `192.168.1.50:8000` не превращается в запрос «в никуда».
+`visionBaseUrl()` / `cadBaseUrl()` в клиентах обоих сервисов берут адрес оттуда же, поэтому в браузере и в
+`web_accessible`-тестах пути остаются относительными (`/v1/recognize`, `/v1/cad/health`).
+
+### 6.1 «Настройки и подключение» и «Проверить связь»
+`components/common/SettingsDialog.tsx` + `probeConnection()` в `runtimeConfig.ts`:
+- два поля адресов с подсказкой итогового URL, кнопка «Подставить» с LAN-адресом хоста, который отдал UI;
+- «Проверить связь» параллельно дергает `/health` и `/v1/cad/health` (таймаут 5 с), показывает задержку,
+  версию OpenCV, движок OCR (`tesseract`, `rapidocr` или «не найден») и доступность STEP (`stepEnabled`,
+  `stepEngine`), различая «сервис ответил 503» и «сервис не отвечает»;
+- «Строгий режим цеха» прячет редактор инженера **только на нативной оболочке**
+  (`canSwitchToEngineer(runtime, settings)`); в браузере редактор остаётся доступным для разработки;
+- панель «Устройство»: имя оболочки, фактический бэкенд офлайн-хранилища и число инструкций на устройстве.
+
+### 6.2 Офлайн-библиотека — `lib/offlineStore.ts`
+Три уровня хранения: IndexedDB (`ikguide-offline`, store `guides`, keyPath `id`) → `localStorage`
+(`ikguide.offline.v1`) → память. Каждая запись `StoredGuide { id, doc, savedAt, source, pinned }`:
+`source` = `engineer | scan | qr | import | demo`. Документ валидируется схемой при сохранении (битый
+документ не попадает в хранилище), повреждённые записи игнорируются при чтении, `persistGuide()` никогда
+не бросает исключение — его вызывают обработчики кликов. Пин «Доступно офлайн» переживает повторное
+сохранение того же документа; `storeBackendName()` показывает фактический бэкенд в диалоге настроек.
+
+### 6.3 QR-мост — `lib/qrBridge.ts`
+```
+документ → JSON → fflate(level 9) → base64url → <base>/?g=<payload>
+```
+Обратный путь: `extractPayload()` понимает полную ссылку, `#/?g=…`, «сырой» payload и `?guide=<id>`;
+`decodeGuidePayload()` распаковывает, проверяет схему и объясняет ошибку по-русски.
+
+Ёмкость одного QR — ~2.5 КБ (`QR_MAX_BYTES`), поэтому `qrVariants()` строит лестницу деградации, и каждая
+ступень обязана пройти схему:
+
+| Ступень | Что остаётся | Что теряется | Предупреждение |
+| --- | --- | --- | --- |
+| 1 | весь документ | — | — |
+| 2 | шаги, инструмент, ГОСТ-переводы, SVG | `.glb` (в `assembly3d` остаётся заглушка `about:blank#glb-stripped`) | «В QR упакованы все шаги, инструмент, ГОСТ-переводы и SVG-схемы; для полного 3D-файла передайте пакет `.ikguide.json` по сети.» |
+| 3 | шаги + SVG + чек-лист | блок `assembly3d` целиком | «3D-узел не помещается в QR…» |
+| 4 | шаги без SVG | SVG-схемы | «SVG-схемы не помещаются в QR…» |
+| 5 | текст шагов, контроль, инструмент, чек-лист | разметка иллюстраций, якоря чертежа | — |
+| 6 | то же, но без переводов обозначений | `xrayAnnotations` + `drawingRefs` | «ГОСТ-переводы обозначений не помещаются…» |
+
+Если не влезает и ступень 6, результат помечается `tooLarge` + `suggestion: 'link'`: ссылка рабочая,
+QR — нет, и диалог честно предлагает вкладку «QR по цеховой ссылке» или пакет/HTML. Дублирующиеся ступени
+отбрасываются сравнением сериализованного документа, чтобы список предупреждений не врал.
+
+Вторая вкладка — `buildWorkshopLink(baseUrl, guideId)` → `<цеховой адрес>/?guide=<id>` (без адреса —
+`ikguide://guide/<id>`): 60-байтная ссылка, работает на `.apk` и на iPhone, но требует сети цеха.
+
+Пакеты: `buildOfflinePackage()` → `.ikguide.json`; `buildStandaloneHtml()` → один `.html` без скриптов,
+внешних ссылок и `src=`: инлайн-стили, встроенные SVG шагов, BOM, инструмент, анти-ошибки, чек-лист и
+`@media print`; весь пользовательский текст экранируется, SVG проходит `sanitizeSvgMarkup`.
+
+### 6.4 Сканер QR — `components/common/QrScannerDialog.tsx`
+`getUserMedia({ facingMode: 'environment' })` → видео → кадр ≤640 px на canvas → `jsqr` (чистый JS,
+загружается динамически, кадры не покидают устройство) → рамка прицела и статус. Дополнительно: фото
+кода из галереи (тот же `jsqr` по `Image`) и ручное поле для ссылки/кода. Успех: `decodeGuidePayload` →
+`adoptGuide(doc, 'scan' | 'qr')` → сохранение в офлайн-библиотеку → «Перед началом работы».
+`useBootLink()` в `App.tsx` повторяет то же для `?g=…` и `?guide=<id>` при старте приложения.
+
+### 6.5 Нативные оболочки
+**Windows `.exe` — Tauri 2** (`apps/desktop-tauri`):
+- `productName: IKGuide Studio`, окно «ИК-Гайд Инженер» 1360×860 (минимум 960×640), `identifier ru.ikguide.studio`;
+- `frontendDist: ../../../apps/studio-web/dist`; `beforeBuildCommand` → `npm run build --prefix ../..` (пакеты ядра +
+  студия, иначе Vite не найдёт `dist` схемы), `beforeDevCommand` → `build:packages` + dev-сервер студии;
+- плагины `dialog` + `fs`; `src-tauri/src/lib.rs` отдаёт команды `print_sheet` (печать через `window.print()`
+  в системный диалог) и `shell_version`;
+- capabilities (`src-tauri/capabilities/default.json`): `core:default`, `dialog:default/allow-open/allow-save`,
+  `fs:default` + чтение/запись текстовых файлов в `$HOME`, `$DESKTOP`, `$DOCUMENT`, `$DOWNLOAD`, `$TEMP`;
+- CSP: `script-src 'self'`, картинки — `data:`/`blob:`; `connect-src` разрешает любой `http(s)`, потому
+  что адрес цехового сервера задаёт инженер (`192.168.x.y:8000`), и перечислить подсети в CSP нельзя.
+  Компенсация: скрипты только свои, никакой внешней загрузки, а сам адрес виден и проверяем в настройках;
+- фронтенд (`lib/nativeExport.ts`) в Tauri-режиме меняет «Скачать» на «Сохранить на диск»: нативный `save()`
+  → `writeTextFile()`, а при отсутствии плагина — обычное скачивание браузера (деградация, не падение).
+
+**Android `.apk` — Capacitor 6** (`apps/mobile-capacitor`): `appId ru.ikguide.worker`, `appName «ИК-Гайд Цех»`,
+`webDir ../../apps/studio-web/dist`, `androidScheme https` + `cleartext: true`; полный Gradle-проект
+`android/` (wrapper 8.x, AGP 8.2.1, Java 17, compileSdk 34) закоммичен; `AndroidManifest.xml` объявляет
+`INTERNET`, `ACCESS_NETWORK_STATE`, `CAMERA` (+ `uses-feature camera required=false`),
+`READ_MEDIA_IMAGES` и `READ_EXTERNAL_STORAGE` (maxSdk 32); `res/xml/network_security_config.xml` разрешают
+cleartext для цеховой сети. Камеру внутри WebView обрабатывает штатный `BridgeWebChromeClient` Capacitor:
+он сам запрашивает разрешение `CAMERA` у Android. Иконки и сплэши — из `scripts/build-icons.py`.
+
+### 6.6 Сборка и CI
+`.github/workflows/ci.yml`: `web-and-tests` (Node 20, `npm ci` → `typecheck` → `test` → `build`),
+`python-services` (Python 3.11, оба `requirements*.txt`, pytest обоих сервисов) и `rust-tauri-check` (`cargo check` в `apps/desktop-tauri/src-tauri` на ubuntu с системными библиотеками
+Tauri) и `config-syntax` (`node scripts/check-native-configs.mjs`).
+
+`.github/workflows/release-builds.yml` (тег `v*` и `workflow_dispatch`):
+- `build-windows-exe` — `windows-latest`, Node 20, `dtolnay/rust-toolchain@stable` + `Swatinem/rust-cache`,
+  `npm ci` → `npm run build` → `npm --prefix apps/desktop-tauri run build -- --bundles nsis,msi`,
+  артефакт `ikguide-studio-windows` (`ikguide-studio-windows.exe` + `ikguide-studio-setup.exe`);
+- `build-android-apk` — `ubuntu-latest`, Node 20, Java 17 temurin, `android-actions/setup-android@v3`,
+  `npm ci` → `npm run build` → `npm --prefix apps/mobile-capacitor run sync` → `./gradlew assembleDebug`,
+  опциональный `assembleRelease` из секретов (шаг `continue-on-error`, без секретов workflow зелёный),
+  артефакт `ikguide-worker-android`;
+- `build-portable-backend` — архив сервисов + `start-workshop-servers.bat|sh` для ПК цеха;
+- по тегу всё прикрепляется к GitHub Release (`softprops/action-gh-release`).
+
+**Честная граница:** в песочнице разработки нет `rustc`, `cargo`, JDK, Gradle и Android SDK, поэтому
+`cargo check` и `assembleDebug` здесь не запускались. Вместо «зелёного статуса из воздуха» —
+`npm run check:native`: 127 статических проверок (пути Tauri, `Cargo.toml`, capabilities, манифест и
+`network_security_config.xml` как XML, размеры всех PNG-иконок по заголовку файла, оба workflow через
+YAML-парсер, CRLF у `.bat`). Компиляцию выполняют раннеры GitHub Actions.
 
 ---
 
@@ -322,11 +417,12 @@ POST /v1/cad/render-view → {svg, azimuth, elevation, triangles}
 
 | Гейт | Команда | Текущий результат |
 | --- | --- | --- |
-| Unit-тесты | `npm test` | 194 теста, 19 файлов, зелёные |
+| Unit-тесты | `npm test` | 241 тест, 23 файла, зелёные |
 | Сервис распознавания | `npm run test:vision` | 98 pytest, зелёные |
 | Сервис 3D-моделей | `npm run test:cad` | 44 pytest, зелёные |
 | Типы | `npm run typecheck` | 0 ошибок, strict |
-| Сборка | `npm run build` | пакеты `tsc` + Vite OK; three.js — отдельный чанк |
+| Сборка | `npm run build` | пакеты `tsc` + Vite OK; three.js и jsQR — отдельные чанки |
+| Нативные конфиги | `npm run check:native` | 127 проверок Tauri/Capacitor/workflow/иконок, 0 провалов |
 
 Правила:
 - новые таблицы ГОСТ — только вместе с тестами на граничные значения (номинал 3, 30, 500 мм; шаг; класс);
@@ -354,7 +450,11 @@ POST /v1/cad/render-view → {svg, azimuth, elevation, triangles}
 | STEP-движок не ставится на сервере | Инженер не может открыть `.step` | `/health` честно отдаёт `stepEnabled:false` + просьбу GLB/STL; браузерный разбор `.glb/.gltf` работает офлайн |
 | Автоматический порядок сборки ошибается | Неверная инструкция | Инженер правит шаги на холсте; `mergeCadUpdate` сохраняет правки; в предупреждениях — пометка о несогласованности |
 | Тёмная тема и печать | Нечитаемые инструкции | `@media print` фиксирует светлые цвета и A4; арт всегда на белой «бумаге» |
-| Потеря документа | Проcтой | Экспорт `.ikguide.json`, QR с контрольной суммой, localStorage как черновик |
+| Потеря документа | Проcтой | Экспорт `.ikguide.json`, офлайн-библиотека (IndexedDB + резерв), автономный HTML, QR с контрольной суммой |
+| QR не вмещает инструкцию | Рабочий не получит шаги | Лестница деградации с честными предупреждениями, `tooLarge` → цеховая ссылка/пакет/HTML; каждая ступень проверяется схемой |
+| Планшет ищет сервер не там | «Сервис недоступен» на ровном месте | Адрес вводится в UI, «Проверить связь» показывает OpenCV/OCR/STEP и задержку, LAN-подсказка, `sanitizeBaseUrl` не пропускает адрес без схемы |
+| Нативная сборка ломается незаметно | Нет `.exe`/`.apk` к обещанному сроку | `check:native` (125 проверок) в CI на каждый push; релизная сборка запускается вручную до тега |
+| Камера запрещена политикой планшета | Сканер не работает | Галерея + ручная ссылка как полноценные пути; честное сообщение вместо пустого экрана |
 
 ---
 
@@ -400,3 +500,30 @@ POST /v1/cad/render-view → {svg, azimuth, elevation, triangles}
 - [x] Третье демо «Узел привода УП-08» — процедурный GLB, работает без сети и без сервиса
 - [x] Офлайн: `.glb/.gltf` разбираются в браузере, `.step` просит `npm run dev:cad`
 - [x] 44 pytest, 14 тестов сборщика, +8 тестов схемы, UI-тесты 3D; `npm test`, `typecheck`, `build`
+
+## 12. Чек-лист готовности этапа 4
+
+- [x] `runtimeConfig.ts`: определение оболочки (`web` / `tauri-desktop` / `capacitor-android`), режим по умолчанию,
+      адреса сервисов с сохранением, `sanitizeBaseUrl`, `joinUrl`, LAN-подсказка, чтение `?g=` и `?guide=`
+- [x] Все сетевые вызовы (`vision.ts`, `cad.ts`) идут через `visionBaseUrl()`/`cadBaseUrl()`
+- [x] «Настройки и подключение»: два адреса, «Проверить связь» (`/health` + `/v1/cad/health`, OpenCV, OCR, STEP),
+      «Строгий режим цеха», панель устройства и хранилища
+- [x] `offlineStore.ts`: IndexedDB → localStorage → память, пин «Доступно офлайн», удаление, валидация схемы
+- [x] Офлайн-библиотека на главном экране рабочего и в панели инженера
+- [x] `qrBridge.ts`: fflate + base64url, лестница из шести ступеней с честными предупреждениями, `tooLarge` → ссылка
+- [x] Вторая вкладка «QR по цеховой ссылке» (`buildWorkshopLink`, `.apk` и iPhone)
+- [x] «Скачать автономный офлайн-пакет (`.ikguide.json`)» и «Экспорт автономного HTML-файла» (без скриптов и сети)
+- [x] Сканер QR: живая камера + рамка, фото из галереи, ручная ссылка; сохранение офлайн и переход на «Перед началом работы»
+- [x] Автостарт по `?g=…` и `?guide=<id>`
+- [x] Tauri 2: `productName IKGuide Studio`, id `ru.ikguide.studio`, окно 1360×860 (min 960×640), NSIS+MSI,
+      capabilities dialog/fs, `print_sheet`, нативное открытие/сохранение, иконки `.ico`/`.png`/`.icns`
+- [x] Capacitor 6: `ru.ikguide.worker`, «ИК-Гайд Цех», полный `android/`-проект (wrapper 8.x, Java 17, compileSdk 34),
+      манифест с CAMERA/INTERNET/READ_MEDIA_IMAGES, `network_security_config.xml`, mipmap-иконки и сплэши
+- [x] `scripts/start-workshop-servers.bat|sh` и `scripts/build-icons.py`
+- [x] `.github/workflows/ci.yml`: типы, тесты, сборка, оба pytest, проверка конфигов
+- [x] `.github/workflows/release-builds.yml`: `.exe` (windows-latest + Rust), `.apk` (ubuntu + Java 17 + SDK),
+      архив цехового сервера, Release по тегу `v*`, опциональная подпись из секретов
+- [x] Тесты этапа 4: `runtimeConfig` (19), `offlineStore` (9), `qrBridge` (15, включая настоящий round trip «модули → jsQR → документ»), UI-сценарии (4) — всего 241 тест / 23 файла
+- [x] `npm run check:native` — 127 статических проверок нативной упаковки, 0 провалов
+- [x] `cargo check` вынесен в CI (джоба `rust-tauri-check`): Rust компилируется на каждом push, хотя локально `rustc` нет
+- [x] README: как скачать `.exe`/`.apk` через Actions/Release и как поднять цеховой сервер на Windows

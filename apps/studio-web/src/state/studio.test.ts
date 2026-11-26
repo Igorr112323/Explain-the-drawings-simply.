@@ -20,6 +20,12 @@ function baseState(overrides: Partial<StudioState> = {}): StudioState {
     viewMode: '2d',
     scan: { open: false, mode: 'files', files: [] },
     vision: null,
+    runtime: 'web',
+    settings: { visionBaseUrl: '', cadBaseUrl: '', strictWorkshop: false },
+    offline: [],
+    settingsOpen: false,
+    scannerOpen: false,
+    offlineLoading: false,
     ...overrides,
   };
 }

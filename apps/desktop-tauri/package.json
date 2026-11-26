@@ -1,0 +1,17 @@
+{
+  "name": "@ikguide/desktop-tauri",
+  "version": "1.0.0",
+  "private": true,
+  "description": "IkGuide Studio для Windows: Tauri v2 оборачивает apps/studio-web в .exe с нативными диалогами открытия и сохранения.",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:nsis": "tauri build --bundles nsis",
+    "icon": "bash scripts/make-icons.sh",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.0"
+  }
+}

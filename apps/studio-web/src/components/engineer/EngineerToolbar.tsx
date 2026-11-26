@@ -5,6 +5,7 @@ interface EngineerToolbarProps {
   onResetView: () => void;
   onImport: () => void;
   onExport: () => void;
+  onExportHtml: () => void;
   onQr: () => void;
   onPrint: () => void;
   onAddStep: () => void;
@@ -18,6 +19,7 @@ export function EngineerToolbar({
   onResetView,
   onImport,
   onExport,
+  onExportHtml,
   onQr,
   onPrint,
   onAddStep,
@@ -32,8 +34,11 @@ export function EngineerToolbar({
         <button type="button" className="toolbar-button" onClick={onImport}>
           <span aria-hidden="true">↧</span> Импорт
         </button>
-        <button type="button" className="toolbar-button" onClick={onExport}>
+        <button type="button" className="toolbar-button" onClick={onExport} title="Сохранить пакет .ikguide.json">
           <span aria-hidden="true">↥</span> Экспорт
+        </button>
+        <button type="button" className="toolbar-button" onClick={onExportHtml} title="Автономный HTML-файл: открывается где угодно">
+          <span aria-hidden="true">▤</span> HTML
         </button>
         <button type="button" className="toolbar-button" onClick={onQr}>
           <span aria-hidden="true">▦</span> QR

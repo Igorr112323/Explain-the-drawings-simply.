@@ -16,8 +16,19 @@ import {
   type IkGuideDocument,
   type XrayAnnotation,
 } from '@ikguide/schema';
+import { useCallback } from 'react';
 import { DEMO_DOCUMENTS } from '../data/demos';
 import type { VisionCandidate, VisionSession } from '../lib/vision';
+import { listGuides, persistGuide, type StoredGuide } from '../lib/offlineStore';
+import {
+  canSwitchToEngineer,
+  defaultModeForRuntime,
+  detectRuntime,
+  loadSettings,
+  saveSettings,
+  type ConnectionSettings,
+  type Runtime,
+} from '../lib/runtimeConfig';
 
 export type StudioMode = 'worker' | 'engineer';
 export type WorkerScreen = 'home' | 'verify' | 'prep' | 'steps' | 'xray' | 'qc' | 'done';
@@ -54,6 +65,16 @@ export interface StudioState {
   scan: ScanRequest;
   /** Recognition session does not survive a reload on purpose: the sheet images are large. */
   vision: VisionSession | null;
+  /** Which shell we run in: the browser, a packaged `.exe` or a packaged `.apk`. */
+  runtime: Runtime;
+  /** Workshop connection settings («Настройки и подключение»). */
+  settings: ConnectionSettings;
+  /** Instructions stored on this device (IndexedDB / localStorage fallback). */
+  offline: StoredGuide[];
+  settingsOpen: boolean;
+  scannerOpen: boolean;
+  /** True while the offline library is being read for the first time (skeleton on the home screen). */
+  offlineLoading: boolean;
 }
 
 export type StudioAction =
@@ -79,7 +100,12 @@ export type StudioAction =
   | { type: 'SET_VISION_DRAFT'; doc: IkGuideDocument }
   | { type: 'ADD_VISION_CANDIDATES'; candidates: VisionCandidate[]; warnings?: string[] }
   | { type: 'ADD_MANUAL_NOTATION'; value: string }
-  | { type: 'CLEAR_VISION' };
+  | { type: 'CLEAR_VISION' }
+  | { type: 'SET_SETTINGS'; settings: ConnectionSettings }
+  | { type: 'SET_OFFLINE_GUIDES'; guides: StoredGuide[]; loading?: boolean }
+  | { type: 'SET_SETTINGS_OPEN'; open: boolean }
+  | { type: 'SET_SCANNER_OPEN'; open: boolean }
+  | { type: 'ADOPT_GUIDE'; doc: IkGuideDocument; screen?: WorkerScreen };
 
 const STORAGE_KEY = 'ikguide.studio.v1';
 
@@ -102,9 +128,10 @@ function cloneDocument(doc: IkGuideDocument): IkGuideDocument {
 }
 
 function initialState(): StudioState {
+  const runtime = detectRuntime();
   const fallback: StudioState = {
     theme: 'light',
-    mode: 'worker',
+    mode: defaultModeForRuntime(runtime),
     screen: 'home',
     stepIndex: 0,
     activeDocId: DEMO_DOCUMENTS[0]!.id,
@@ -117,6 +144,12 @@ function initialState(): StudioState {
     viewMode: '2d',
     scan: { open: false, mode: 'files', files: [] },
     vision: null,
+    runtime,
+    settings: loadSettings(),
+    offline: [],
+    settingsOpen: false,
+    scannerOpen: false,
+    offlineLoading: true,
   };
 
   if (typeof window === 'undefined') {
@@ -283,6 +316,36 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     }
     case 'CLEAR_VISION':
       return { ...state, vision: null, uploadedImage: null };
+    case 'SET_SETTINGS': {
+      // «Строгий режим цеха» turns the tablet into a worker-only device: never leave the engineer
+      // screen open behind the worker's back.
+      const allowed = canSwitchToEngineer(state.runtime, action.settings);
+      return {
+        ...state,
+        settings: action.settings,
+        mode: allowed ? state.mode : 'worker',
+        screen: !allowed && state.mode === 'engineer' ? 'home' : state.screen,
+      };
+    }
+    case 'SET_OFFLINE_GUIDES':
+      return { ...state, offline: action.guides, offlineLoading: action.loading ?? false };
+    case 'SET_SETTINGS_OPEN':
+      return { ...state, settingsOpen: action.open };
+    case 'SET_SCANNER_OPEN':
+      return { ...state, scannerOpen: action.open };
+    case 'ADOPT_GUIDE': {
+      const others = state.docs.filter((doc) => doc.id !== action.doc.id);
+      return {
+        ...state,
+        docs: [...others, action.doc],
+        activeDocId: action.doc.id,
+        stepIndex: 0,
+        viewMode: '2d',
+        screen: action.screen ?? 'prep',
+        scannerOpen: false,
+        focusedAnnotationId: null,
+      };
+    }
     default:
       return state;
   }
@@ -296,6 +359,12 @@ interface StudioContextValue {
   unconfirmed: XrayAnnotation[];
   qcCompleted: string[];
   isQcComplete: boolean;
+  /** Re-reads the offline library (after saving, deleting or pinning an instruction). */
+  refreshOffline: () => Promise<void>;
+  /** Saves an instruction on this device and opens it — the single path for scans and QR links. */
+  adoptGuide: (doc: IkGuideDocument, source: StoredGuide['source'], screen?: WorkerScreen) => Promise<void>;
+  /** True when the current shell may show the engineer editor at all. */
+  canEngineer: boolean;
 }
 
 const StudioContext = createContext<StudioContextValue | null>(null);
@@ -308,6 +377,29 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const unconfirmed = useMemo(() => getUnconfirmedAnnotations(doc), [doc]);
   const qcCompleted = state.qcDone[doc.id] ?? [];
   const isQcComplete = doc.qcChecklist.filter((item) => item.required).every((item) => qcCompleted.includes(item.id));
+
+  const refreshOffline = useCallback(async () => {
+    const guides = await listGuides();
+    dispatch({ type: 'SET_OFFLINE_GUIDES', guides });
+  }, []);
+
+  const adoptGuide = useCallback(
+    async (incoming: IkGuideDocument, source: StoredGuide['source'], screen: WorkerScreen = 'prep') => {
+      dispatch({ type: 'ADOPT_GUIDE', doc: incoming, screen });
+      await persistGuide(incoming, { source, savedAt: new Date().toISOString() });
+      const guides = await listGuides();
+      dispatch({ type: 'SET_OFFLINE_GUIDES', guides });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    void refreshOffline();
+  }, [refreshOffline]);
+
+  useEffect(() => {
+    saveSettings(state.settings);
+  }, [state.settings]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = state.theme;
@@ -339,6 +431,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     unconfirmed,
     qcCompleted,
     isQcComplete,
+    refreshOffline,
+    adoptGuide,
+    canEngineer: canSwitchToEngineer(state.runtime, state.settings),
   };
 
   return <StudioContext.Provider value={value}>{children}</StudioContext.Provider>;

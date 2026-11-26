@@ -6,11 +6,15 @@ import {
   type IkGuideDocument,
 } from '@ikguide/schema';
 import { useStudio } from '../../state/studio';
-import { readTextFile, downloadText, sanitizeFileName } from '../../lib/download';
+import { readTextFile, sanitizeFileName } from '../../lib/download';
+import { persistGuide } from '../../lib/offlineStore';
+import { guideFileName, isNativeShell, openTextFileNative, printNative, saveTextFile } from '../../lib/nativeExport';
+import { buildStandaloneHtml } from '../../lib/qrBridge';
 import { BomCanvasCard, StepCanvasCard, SummaryCard, ToolsCanvasCard, type CanvasPosition } from './EngineerCards';
 import { CadCanvasCard } from './CadCanvasCard';
 import { EngineerToolbar } from './EngineerToolbar';
 import { QrDialog } from '../common/QrDialog';
+import { OfflineLibrary } from '../common/OfflineLibrary';
 
 interface ViewportState {
   x: number;
@@ -34,7 +38,7 @@ type DragState =
   | { kind: 'card'; id: string; startX: number; startY: number; originX: number; originY: number };
 
 export function EngineerCanvas() {
-  const { doc, dispatch } = useStudio();
+  const { doc, dispatch, refreshOffline } = useStudio();
   const [view, setView] = useState<ViewportState>({ x: 0, y: 0, scale: 0.85 });
   const [positions, setPositions] = useState<Record<string, CanvasPosition>>({});
   const [dragging, setDragging] = useState(false);
@@ -171,17 +175,34 @@ export function EngineerCanvas() {
     dispatch({ type: 'SHOW_TOAST', tone: 'success', text: `Добавлен шаг ${nextNumber}. Отредактируйте текст прямо на карточке.` });
   };
 
-  const exportDocument = () => {
+  const exportDocument = async () => {
     try {
       const json = serializeDocument(doc);
-      downloadText(`${sanitizeFileName(doc.metadata.drawingCode)}-${doc.metadata.revision}.ikguide.json`, json);
-      dispatch({ type: 'SHOW_TOAST', tone: 'success', text: 'Файл .ikguide.json сохранён.' });
+      const fileName = guideFileName(`${doc.metadata.drawingCode}-${doc.metadata.revision}`);
+      const result = await saveTextFile(fileName, json, { kind: 'json' });
+      dispatch({
+        type: 'SHOW_TOAST',
+        tone: 'success',
+        text: result.path ? `Файл сохранён: ${result.path}` : 'Файл .ikguide.json скачан.',
+      });
     } catch (error) {
       dispatch({
         type: 'SHOW_TOAST',
         tone: 'danger',
         text: error instanceof Error ? error.message : 'Документ не прошёл проверку схемы',
       });
+    }
+  };
+
+  const exportHtml = async () => {
+    try {
+      await saveTextFile(`${sanitizeFileName(doc.metadata.drawingCode)}-инструкция.html`, buildStandaloneHtml(doc), {
+        kind: 'html',
+        mimeType: 'text/html',
+      });
+      dispatch({ type: 'SHOW_TOAST', tone: 'success', text: 'Автономный HTML-файл инструкции готов.' });
+    } catch {
+      dispatch({ type: 'SHOW_TOAST', tone: 'danger', text: 'Не удалось собрать автономный HTML-файл.' });
     }
   };
 
@@ -193,6 +214,8 @@ export function EngineerCanvas() {
       const text = await readTextFile(file);
       const imported: IkGuideDocument = parseDocumentJson(text);
       dispatch({ type: 'IMPORT_DOC', doc: imported });
+      await persistGuide(imported, { source: 'import' });
+      await refreshOffline();
       dispatch({ type: 'SHOW_TOAST', tone: 'success', text: `Импортирована инструкция «${imported.metadata.title}».` });
     } catch (error) {
       dispatch({
@@ -210,10 +233,20 @@ export function EngineerCanvas() {
         onZoomIn={() => zoomBy(1.12)}
         onZoomOut={() => zoomBy(0.9)}
         onResetView={resetView}
-        onImport={() => importInput.current?.click()}
+        onImport={() => {
+          if (isNativeShell()) {
+            // Windows: a real «Открыть файл» dialog instead of the browser picker.
+            void openTextFileNative()
+              .then((picked) => (picked ? importDocument(new File([picked.text], picked.name)) : undefined))
+              .catch(() => undefined);
+            return;
+          }
+          importInput.current?.click();
+        }}
         onExport={exportDocument}
+        onExportHtml={exportHtml}
         onQr={() => setQrOpen(true)}
-        onPrint={() => window.print()}
+        onPrint={() => void printNative()}
         onAddStep={addStep}
         onPreviewWorker={() => {
           dispatch({ type: 'SET_MODE', mode: 'worker' });
@@ -248,6 +281,14 @@ export function EngineerCanvas() {
           ))}
         </div>
       </div>
+
+      <aside className="engineer-library" aria-label="Инструкции на этом устройстве">
+        <div className="engineer-library-head">
+          <strong>На устройстве</strong>
+          <span className="muted small">открываются без сети</span>
+        </div>
+        <OfflineLibrary variant="engineer" emptyHint="Импортируйте .ikguide.json или получите инструкцию по QR — она сохранится здесь." />
+      </aside>
 
       <div className="engineer-hint">
         <strong>Свободный холст</strong>

@@ -4,12 +4,16 @@ import type {
   VisionRecognizeResponse,
   VisionTitleBlock,
 } from '@ikguide/builder';
+import { detectRuntime, getVisionBaseUrl, joinUrl, loadSettings } from './runtimeConfig';
 
 export type { VisionCandidate, VisionPage, VisionRecognizeResponse, VisionTitleBlock };
 
 /**
- * Client of the local Python vision service. Requests are strictly relative (`/v1/...`), because the
- * dev server, the preview server and a packaged Tauri shell all proxy them to the real service.
+ * Client of the local Python vision service.
+ *
+ * Paths stay relative (`/v1/...`) in the browser, where the Vite dev/preview server proxies them to
+ * port 8000. Inside the packaged `.exe` / `.apk` there is no proxy, so `runtimeConfig` supplies the
+ * absolute workshop address the engineer typed in «Настройки и подключение».
  */
 export type VisionErrorKind = 'offline' | 'rejected' | 'server';
 
@@ -63,16 +67,27 @@ export interface RegionRect {
 const HEALTH_TIMEOUT_MS = 4000;
 const RECOGNIZE_TIMEOUT_MS = 120_000;
 
+/**
+ * Absolute address of the vision service for the current shell: empty on the web (the Vite proxy
+ * answers `/health` and `/v1/...`), the saved workshop address inside `.exe` / `.apk`.
+ */
+export function visionBaseUrl(): string {
+  return getVisionBaseUrl(loadSettings(), detectRuntime());
+}
+
 async function request(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
   const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  const base = visionBaseUrl();
+  const target = joinUrl(base, url);
+  const where = base ? ` по адресу ${base}` : '';
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await fetch(target, { ...init, signal: controller.signal });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new VisionError('offline', 'Сервис распознавания не ответил вовремя.');
+      throw new VisionError('offline', `Сервис распознавания не ответил вовремя${where}.`);
     }
-    throw new VisionError('offline', 'Сервис распознавания недоступен.');
+    throw new VisionError('offline', `Сервис распознавания недоступен${where}.`);
   } finally {
     globalThis.clearTimeout(timer);
   }

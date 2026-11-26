@@ -1,10 +1,12 @@
 import type { CadImportResponse, CadStepPayload } from '@ikguide/builder';
+import { detectRuntime, getCadBaseUrl, joinUrl, loadSettings } from './runtimeConfig';
 
 /**
- * Client of the local Python CAD service (port 8001 by default, proxied by Vite).
+ * Client of the local Python CAD service (port 8001 by default, proxied by Vite in the browser).
  *
- * Requests are strictly relative (`/v1/cad/...`): the studio never learns the host of the service,
- * so the same bundle works on the shop floor laptop, in the preview sandbox and inside Tauri.
+ * The studio never hard-codes a host: `runtimeConfig` keeps `/v1/cad/...` relative on the web and
+ * prefixes the saved workshop address inside the packaged `.exe` / `.apk`. The same bundle therefore
+ * works on the shop-floor laptop, in the preview sandbox and inside a native shell.
  * Everything here degrades gracefully: when the service is down the studio keeps working with the
  * built-in 3D demo and with the in-browser GLB loader.
  */
@@ -79,16 +81,24 @@ export function needsCadServer(fileName: string): boolean {
   return format === '.step' || format === '.stp';
 }
 
+/** Absolute address of the CAD service for the current shell (empty → Vite proxy on the web). */
+export function cadBaseUrl(): string {
+  return getCadBaseUrl(loadSettings(), detectRuntime());
+}
+
 async function request(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
   const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  const base = cadBaseUrl();
+  const target = joinUrl(base, url);
+  const where = base ? ` по адресу ${base}` : '';
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await fetch(target, { ...init, signal: controller.signal });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new CadError('offline', 'Сервис 3D-моделей не ответил вовремя.');
+      throw new CadError('offline', `Сервис 3D-моделей не ответил вовремя${where}.`);
     }
-    throw new CadError('offline', 'Сервис 3D-моделей недоступен.');
+    throw new CadError('offline', `Сервис 3D-моделей недоступен${where}.`);
   } finally {
     globalThis.clearTimeout(timer);
   }

@@ -79,6 +79,38 @@
   внутри бандла) работает без сети и без сервиса; `.glb/.gltf`, загруженный в браузере, разбирается
   локально (`cadOffline.ts`), `.step` честно просит `npm run dev:cad`.
 
+### Цех без сети: `.exe`, `.apk`, QR и офлайн-библиотека (этап 4)
+- **Один бандл — три оболочки**: браузер (dev/preview), Windows `.exe` (Tauri 2) и Android `.apk`
+  (Capacitor 6). `runtimeConfig.ts` сам понимает, где он запущен: в браузере запросы остаются
+  относительными (`Vite`-прокси), в нативной оболочке к ним подставляется адрес цехового сервера.
+  Стартовый режим тоже разный: планшет открывается как «Рабочий», `.exe` — как «Инженер».
+- **«Настройки и подключение»** (шестерёнка в верхней капсуле): два адреса сервисов, подсказка
+  локального IP одной кнопкой, «Проверить связь» — реальные запросы к `/health` и `/v1/cad/health`
+  с версией OpenCV, движком OCR и доступностью STEP, и переключатель **«Строгий режим цеха»**,
+  который убирает редактор инженера с планшета.
+- **QR-мост**: инструкция сжимается (`fflate` + base64url) и целиком уезжает в ссылку
+  `<адрес>/?g=<payload>` — телефону не нужны ни сеть, ни приложение. Код вмещает ~2.5 КБ, поэтому
+  тяжёлые части отбрасываются **в объявленном порядке** и с честным предупреждением: сначала `.glb`
+  («В QR упакованы все шаги, инструмент, ГОСТ-переводы и SVG-схемы; для полного 3D-файла передайте
+  пакет `.ikguide.json` по сети»), затем `assembly3d`, затем SVG-схемы, затем переводы обозначений.
+  Если не влезает даже самое компактное представление — диалог прямо говорит «не помещается» и
+  предлагает вторую вкладку.
+- **Вторая вкладка «QR по цеховой ссылке»**: короткая ссылка на инструкцию на цеховом сервере —
+  работает на `.apk` и на iPhone, нужен только Wi-Fi цеха.
+- **Сканер QR-кода**: живой поток камеры с рамкой прицела (`jsqr`, всё локально), кнопка «Выбрать
+  фото QR-кода из галереи» и поле для ссылки/кода вручную. Распознанная инструкция проверяется
+  схемой, сохраняется офлайн и сразу открывается на «Перед началом работы». Ссылка `?g=…` или
+  `?guide=…` в адресной строке открывает инструкцию при старте приложения.
+- **Офлайн-библиотека** (`IndexedDB`, с откатом на `localStorage` и память): всё созданное,
+  импортированное и отсканированное остаётся на устройстве. На главном экране рабочего — блок
+  «Доступно офлайн» с пином и удалением, у инженера — панель «На устройстве».
+- **Пакет и автономный HTML**: «Скачать автономный офлайн-пакет (`.ikguide.json`)» и «Экспорт
+  автономного HTML-файла» — один самодостаточный `.html` без скриптов и сети, со встроенными SVG,
+  инструментом и чек-листом. В `.exe` те же кнопки открывают нативный диалог сохранения.
+- **Сборка `.exe`/`.apk` — в GitHub Actions** (`.github/workflows/release-builds.yml`): Windows-раннер
+  собирает `.exe` через Tauri, Linux-раннер — `.apk` через Capacitor + Gradle. Готовые файлы лежат в
+  Artifacts каждого запуска и прикрепляются к Release по тегу `v1.0.0`.
+
 ### Ядро ГОСТ/ЕСКД — 100 % детерминированное, без LLM
 `packages/gost-translator` — таблицы и парсеры, один и тот же ввод всегда даёт один и тот же вывод:
 
@@ -115,8 +147,15 @@
 │       └── src/document.ts       # стадии, инструмент, QC, id документа
 │       └── src/tools.ts          # политика инструмента на семейство обозначений
 │       └── src/cad.ts            # buildGuideFromCad / mergeCadUpdate: 3D-ответ → инструкция
+├── .github/workflows/
+│   ├── ci.yml                    # push/PR: типы, тесты, сборка, pytest обоих сервисов, проверка конфигов
+│   └── release-builds.yml        # тег v* / вручную: .exe (Tauri), .apk (Gradle), архив цехового сервера
 ├── scripts/
 │   ├── build-demo-3d.py          # процедурная сборка УП-08 → apps/studio-web/src/data/up08-assembly.ts
+│   ├── build-icons.py            # один скрипт → .ico/.icns/.png Tauri и mipmap-*/splash Android
+│   ├── check-native-configs.mjs  # 127 статических проверок нативной упаковки (без Rust/JDK)
+│   ├── start-workshop-servers.sh # цеховой сервер на Linux/macOS
+│   ├── start-workshop-servers.bat# цеховой сервер на Windows (CRLF, двойной щелчок)
 │   └── dev-all.sh                # vision + cad + студия одной командой
 ├── services/
 │   ├── vision-api/               # Python FastAPI: OpenCV + PyMuPDF + RapidOCR
@@ -128,12 +167,17 @@
 │       ├── tests/                # 44 pytest на синтетических STL/GLB/STEP
 │       └── run.sh                # install | dev | test (venv + зависимости)
 └── apps/
+    ├── desktop-tauri/            # @ikguide/desktop-tauri — Windows .exe (Tauri 2)
+    │   └── src-tauri/            # Cargo.toml, lib.rs/main.rs, tauri.conf.json, capabilities, icons
+    ├── mobile-capacitor/         # @ikguide/mobile-capacitor — Android .apk (Capacitor 6)
+    │   ├── capacitor.config.ts   # appId ru.ikguide.worker, cleartext для цеховой сети
+    │   └── android/              # полный Gradle-проект: wrapper, manifest, res/, MainActivity
     └── studio-web/               # @ikguide/studio-web — React + TS + Vite
         └── src/art/              # векторные схемы шагов и листы чертежей (3 цвета)
         └── src/components/worker # 6 экранов цеха (включая ROI на «Рентгене»)
         └── src/components/common # диалог сканирования, камера, Assembly3DViewer (three.js)
         └── src/components/engineer # холст, карточки, карточка 3D-сборки, печать, QR
-        └── src/lib/              # клиенты обоих сервисов, ikeaSvg (офлайн-рендер), cadOffline
+        └── src/lib/              # клиенты сервисов, runtimeConfig, offlineStore, qrBridge, nativeExport
         └── src/data/             # два 2D-демо и 3D-демо УП-08 (процедурный .glb)
         └── src/state/            # reducer + localStorage
 ```
@@ -176,11 +220,12 @@ FastAPI) и поднимает uvicorn с автоперезагрузкой. OC
 Проверки качества (те же команды, что в CI):
 
 ```bash
-npm test           # Vitest: 194 теста, 19 файлов
+npm test            # Vitest: 241 тест, 23 файла
 npm run test:vision # pytest: 98 тестов сервиса распознавания
-npm run test:cad   # pytest: 44 теста сервиса 3D-моделей
-npm run typecheck  # tsc --noEmit, 0 ошибок
-npm run build      # packages tsc + Vite production build
+npm run test:cad    # pytest: 44 теста сервиса 3D-моделей
+npm run typecheck   # tsc --noEmit, 0 ошибок
+npm run build       # packages tsc + Vite production build
+npm run check:native # 127 проверок Tauri/Capacitor/workflow/иконок (то, что собирается только в CI)
 ```
 
 Полезные скрипты:
@@ -199,6 +244,82 @@ npm run build      # packages tsc + Vite production build
 | `npm run install:cad` | только установка Python-зависимостей CAD-сервиса |
 | `npm run test:cad` | pytest сервиса 3D-моделей (44 теста) |
 | `npm run dev:all` | оба Python-сервиса и студия одной командой |
+| `npm run check:native` | проверка Tauri/Capacitor/workflow/иконок без Rust и Android SDK |
+| `npm run desktop:dev` | `.exe` в dev-режиме (Tauri 2, окно 1360×860) |
+| `npm run desktop:build` | сборка `.exe` на машине с Rust и Windows (NSIS + MSI) |
+| `npm run desktop:icons` | перерисовать иконки `.ico`/`.png`/`mipmap-*` из одного скрипта |
+| `npm run mobile:build-web` / `mobile:sync` | бандл студии → `android/app/src/main/assets/public` |
+| `npm run mobile:apk` | `assembleDebug` локально (нужны JDK 17 и Android SDK) |
+| `npm run workshop:servers` | цеховой сервер (оба сервиса на `0.0.0.0`) одним скриптом |
+
+---
+
+## Как скачать готовые `.exe` и `.apk` через GitHub Actions
+
+Собирать нативное приложение локально не нужно: оба установщика собираются на чужих раннерах
+(Windows — Tauri, Linux — Gradle), а в репозитории лежат только исходники, конфиги и иконки.
+
+### Вариант 1 — запустить сборку вручную (без тега)
+
+1. Откройте вкладку **Actions** репозитория.
+2. Слева выберите **Release builds**.
+3. Кнопка **Run workflow** → ветка (обычно `main`) → **Run workflow**.
+4. Дождитесь зелёной галочки (первый запуск ~10–15 минут: Rust-кэш и Gradle пустые).
+5. Внизу страницы запуска, в блоке **Artifacts**, скачайте:
+   - **`ikguide-studio-windows`** → `ikguide-studio-windows.exe` (portable) и `ikguide-studio-setup.exe` (NSIS);
+   - **`ikguide-worker-android`** → `ikguide-worker-android.apk` (debug, ставится на планшет);
+   - **`ikguide-workshop-backend`** → архив с Python-сервисами и скриптом запуска для цехового ПК.
+
+### Вариант 2 — выпустить версию тегом (Release с файлами)
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Тег `v*` запускает тот же workflow и дополнительно прикрепляет `.exe`, `.apk` и архив бэкенда к
+**GitHub Release** — рабочим можно отдавать прямые ссылки на скачивание.
+
+### Установка на планшет (Android)
+
+1. Скачайте `ikguide-worker-android.apk` на планшет (или передайте файлом).
+2. Разрешите установку из этого источника, если Android спросит.
+3. Откройте приложение → шестерёнка → «Настройки и подключение» → впишите адрес цехового ноутбука
+   (например `http://192.168.1.50:8000` и `http://192.168.1.50:8001`) → «Проверить связь».
+4. Для планшета, который не должен показывать редактор инженера, включите **«Строгий режим цеха»**.
+
+Debug-APK подписан отладочным ключом и обновляется только переустановкой. Для боевой подписи
+добавьте секреты `IKGUIDE_KEYSTORE_BASE64`, `IKGUIDE_KEYSTORE_PASSWORD`, `IKGUIDE_KEY_ALIAS`,
+`IKGUIDE_KEY_PASSWORD` — workflow соберёт `ikguide-worker-android-release.apk` (шаг помечен
+`continue-on-error`, поэтому без секретов сборка не падает).
+
+### Установка на Windows (`.exe`)
+
+- `ikguide-studio-setup.exe` — установщик NSIS (для текущего пользователя, без прав администратора);
+- `ikguide-studio-windows.exe` — переносимый файл: положите на флешку, запустите, ничего не ставится.
+
+SmartScreen покажет предупреждение о неизвестном издателе: подпись EV-сертификатом — отдельная задача,
+кода она не касается.
+
+## Цеховой сервер на Windows (локальная сеть без интернета)
+
+Оба Python-сервиса работают на обычном ноутбуке цеха; планшет ходит к ним по Wi-Fi, ничего наружу
+не уходит.
+
+```bat
+:: один раз: Python 3.11 с python.org, галочка «Add python.exe to PATH»
+scripts\start-workshop-servers.bat install
+:: каждый рабочий день:
+scripts\start-workshop-servers.bat
+```
+
+Скрипт печатает адреса (`http://192.168.1.50:8000/health` и `http://192.168.1.50:8001/v1/cad/health`)
+и открывает `/health` в браузере. Это же окно показывает, какие адреса вписать на планшете.
+Останавливаются сервисы закрытием окон; ярлык на скрипт можно положить на рабочий стол.
+Тот же архив и скрипт лежат в Artifacts (`ikguide-workshop-backend`).
+
+Для Linux/macOS то же самое: `bash scripts/start-workshop-servers.sh install` и затем
+`npm run workshop:servers`.
 
 ---
 
@@ -269,7 +390,20 @@ npm run build      # packages tsc + Vite production build
   PDF/сканы с текстовым слоем. Системного Tesseract в контейнере нет.
 - Автоопределение габарита заготовки по видам — эвристика: если не нашлось, в инструкции будет
   `Габарит заготовки уточнить у инженера` и предупреждение (лучше честно, чем выдумать размер).
-- `.exe`/`.apk` не собираются в Linux-контейнере: ядро, UI и сборка проверены через Node/Vite, упаковка — этап 4.
+- **`.exe` и `.apk` не собираются в песочнице разработки**: в ней нет `rustc`, `cargo`, JDK, Gradle и
+  Android SDK. Поэтому конфиги Tauri/Capacitor, Rust-исходники, полный Gradle-проект, иконки и CI
+  проверяются статически (`npm run check:native` — 127 проверок), а Rust компилируется в CI
+  (`cargo check` в джобе `rust-tauri-check`), настоящие бинарники собирает GitHub Actions. Ни `cargo check`, ни `gradlew assembleDebug` здесь не запускались — это указано
+  честно, а не замаскировано зелёным статусом.
+- **В QR помещается ~2.5 КБ**: шестишаговая инструкция с проверками сжимается до 4–5 КБ, поэтому
+  большие инструкции физически не влезают в один код. Диалог QR в этом случае честно пишет
+  «не помещается» и предлагает цеховую ссылку, пакет `.ikguide.json` или автономный HTML.
+- **Cleartext-HTTP в Android** разрешён осознанно (цеховой сервер без сертификата): ограничить его
+  диапазонами `192.168.*.*` через `network_security_config.xml` нельзя — это список доменов, а не
+  подсеть; компенсация — приложение цеха, а не браузер, и явные записи для `localhost`/`10.0.2.2`.
+- **Подпись release-APK** требует ваших секретов в GitHub: без них собирается debug-APK.
+- **Камера в WebView** отдана Capacitor: Android спрашивает разрешение CAMERA сам; если политика
+  планшета запрещает камеру, сканер работает через фото из галереи и ручную ссылку.
 - Озвучка использует Web Speech API: голос зависит от системы. Если русского голоса нет, шаг просто не
   прочитается — покажем уведомление.
 - Документы сохраняются в `localStorage` браузера; облачная синхронизация — вне этапа 1.
@@ -289,12 +423,14 @@ npm run build      # packages tsc + Vite production build
 | ГОСТ-ядро | `packages/gost-translator/src/**/*.test.ts` (55) | точные значения в мкм, границы диапазонов 3/30 мм, нестандартные шаги, неизвестные поля, пересечения парсеров |
 | Схема | `packages/ikguide-schema/src/schema.test.ts` (26) | валидность, дубликаты, висячие ссылки, порог уверенности, IO, перестановка шагов, блок `assembly3d` (дубли деталей, чужие шаги, активная∩установленная, SVG-проверка) |
 | Сборка черновика | `packages/ikguide-builder/src/builder.test.ts` (18) + `cad.test.ts` (14) | стадии и нумерация, политика инструмента, QC по посадкам, fallback-и без штампа, лимиты, ручные шифры; 3D: ГОСТ-перевод крепежа, группировка 4+4, момент и ключ, слияние ревизий с сохранением ручных правок |
-| Демо и UI | `apps/studio-web/src/**/*.test.ts(x)` (81) | все три проекта проходят схему, пины переводятся, reducer (scan/vision/2D↔3D), QR, печать, smoke-проход по экранам, офлайновый IKEA-рендер (палитра, ось, стрелка, детерминизм, санитайзер), клиенты обоих сервисов, офлайн-разбор GLB |
+| Демо и UI | `apps/studio-web/src/**/*.test.ts(x)` (128) | все три проекта проходят схему, пины переводятся, reducer (scan/vision/2D↔3D), QR, печать, smoke-проход по экранам, офлайновый IKEA-рендер, клиенты обоих сервисов, офлайн-разбор GLB, «Настройки и подключение» (адреса, проверка связи, строгий режим), сканер QR с вставленной ссылкой, офлайн-библиотека |
+| Нативные оболочки | `scripts/check-native-configs.mjs` (127) | `tauri.conf.json` (productName, identifier, окно 1360×860/min 960×640, путь `frontendDist`), `Cargo.toml`, `lib.rs`/`main.rs`, capabilities dialog+fs, `capacitor.config.ts`, полный `android/`-проект, `AndroidManifest` (CAMERA/INTERNET/READ_MEDIA_IMAGES), `network_security_config.xml`, размеры всех `mipmap-*` PNG, оба workflow, CRLF у `.bat` |
 | Сервис распознавания | `services/vision-api/tests` (98 pytest) | синтетические листы и векторный PDF, перспектива, качество, нормализация, штамп, `/v1/recognize`, ROI, ошибки 4xx |
 | Сервис 3D-моделей | `services/cad-api/tests` (44 pytest) | синтетические STL/OBJ/GLB/STEP, нормализация единиц, роли и группировка крепежа, порядок без пересечений, SVG (валидный XML, 3 цвета, пунктирная ось, класс `attention`), `/health`, `/v1/cad/import`, `/v1/cad/render-view`, ошибки 415/413/422/404 |
 
 ## Дальше
 
-Дорожная карта — [ARCHITECTURE.md](./ARCHITECTURE.md): упаковка Tauri `.exe` + Capacitor `.apk` (этап 4).
-Этапы 1–3 уже в репозитории: `services/vision-api`, `services/cad-api`, `packages/ikguide-builder`
-(`buildGuideFromVision`, `buildGuideFromCad`, `mergeCadUpdate`) и студия с 2D- и 3D-просмотром.
+Этапы 1–4 в репозитории: ядро ГОСТ/ЕСКД, `services/vision-api`, `services/cad-api`, студия с 2D- и
+3D-просмотром, офлайн-библиотека и QR-мост, плюс сборка `.exe`/`.apk` в GitHub Actions.
+Следующие шаги — [ARCHITECTURE.md](./ARCHITECTURE.md): подпись кода, автообновление `.exe`, нативный TTS
+вместо Web Speech API и синхронизация цеховых планшетов с сервером.

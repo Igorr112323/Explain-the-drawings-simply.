@@ -6,7 +6,7 @@
   "description": "IkGuide — drawing to IKEA-style instruction platform: GOST/ESKD core, worker app and engineer studio.",
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/studio-web"
   ],
   "engines": {
     "node": ">=20.11"
@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check:native": "node scripts/check-native-configs.mjs",
     "build": "npm run build:packages && npm run build -w @ikguide/studio-web",
     "build:packages": "npm run build -w @ikguide/schema -w @ikguide/gost-translator -w @ikguide/builder",
     "dev:vision": "bash services/vision-api/run.sh dev",
@@ -24,12 +25,20 @@
     "install:vision": "bash services/vision-api/run.sh install",
     "install:cad": "bash services/cad-api/run.sh install",
     "test:vision": "bash services/vision-api/run.sh test",
-    "test:cad": "bash services/cad-api/run.sh test"
+    "test:cad": "bash services/cad-api/run.sh test",
+    "desktop:dev": "npm --prefix apps/desktop-tauri run dev",
+    "desktop:build": "npm --prefix apps/desktop-tauri run build",
+    "desktop:icons": "bash apps/desktop-tauri/scripts/make-icons.sh",
+    "mobile:build-web": "npm run build -w @ikguide/studio-web",
+    "mobile:sync": "npm --prefix apps/mobile-capacitor run sync",
+    "mobile:apk": "npm --prefix apps/mobile-capacitor run apk",
+    "workshop:servers": "bash scripts/start-workshop-servers.sh"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
     "jsdom": "^25.0.1",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.5"
+    "vitest": "^2.1.5",
+    "yaml": "^2.9.1"
   }
 }

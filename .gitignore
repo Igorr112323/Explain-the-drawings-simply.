@@ -20,3 +20,12 @@ __pycache__/
 .venv/
 services/vision-api/.venv/
 services/cad-api/.venv/
+
+# Capacitor: скопированный веб-бандл и сгенерированные конфиги android-проекта
+apps/mobile-capacitor/android/app/src/main/assets/public/
+apps/mobile-capacitor/android/app/src/main/assets/capacitor.config.json
+apps/mobile-capacitor/android/app/src/main/assets/capacitor.plugins.json
+apps/mobile-capacitor/android/capacitor-cordova-android-plugins/
+apps/mobile-capacitor/android/.gradle/
+apps/mobile-capacitor/android/app/build/
+apps/mobile-capacitor/android/local.properties

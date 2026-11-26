@@ -1,7 +1,7 @@
 import { useStudio } from '../state/studio';
 
 export function TopBar() {
-  const { state, dispatch, doc } = useStudio();
+  const { state, dispatch, doc, canEngineer } = useStudio();
 
   return (
     <header className="top-bar">
@@ -28,18 +28,44 @@ export function TopBar() {
           Рабочий
           <span className="mode-hint">.apk</span>
         </button>
-        <button
-          type="button"
-          className={state.mode === 'engineer' ? 'mode-button is-active' : 'mode-button'}
-          aria-pressed={state.mode === 'engineer'}
-          onClick={() => dispatch({ type: 'SET_MODE', mode: 'engineer' })}
-        >
-          Инженер
-          <span className="mode-hint">.exe</span>
-        </button>
+        {canEngineer ? (
+          <button
+            type="button"
+            className={state.mode === 'engineer' ? 'mode-button is-active' : 'mode-button'}
+            aria-pressed={state.mode === 'engineer'}
+            onClick={() => dispatch({ type: 'SET_MODE', mode: 'engineer' })}
+          >
+            Инженер
+            <span className="mode-hint">.exe</span>
+          </button>
+        ) : (
+          <span className="mode-locked" title="Строгий режим цеха: редактор инженера скрыт на этом устройстве">
+            Строгий режим цеха
+          </span>
+        )}
       </nav>
 
       <div className="top-actions">
+        <button
+          type="button"
+          className="capsule qr-scan-capsule"
+          onClick={() => dispatch({ type: 'SET_SCANNER_OPEN', open: true })}
+          title="Сканировать QR-код инструкции камерой"
+        >
+          <span aria-hidden="true">▦</span> Сканер QR
+        </button>
+        <button
+          type="button"
+          className="capsule settings-capsule"
+          onClick={() => dispatch({ type: 'SET_SETTINGS_OPEN', open: true })}
+          title="Настройки и подключение: адреса сервисов и строгий режим цеха"
+          aria-label="Настройки и подключение"
+        >
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round">
+            <circle cx="12" cy="12" r="3.2" />
+            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" />
+          </svg>
+        </button>
         <button
           type="button"
           className="capsule scan-capsule"
