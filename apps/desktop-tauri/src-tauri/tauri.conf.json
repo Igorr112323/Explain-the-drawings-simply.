@@ -22,7 +22,7 @@
         "center": true,
         "visible": true,
         "backgroundColor": "#FBFBFD",
-        "theme": "light",
+        "theme": "Light",
         "dragDropEnabled": true
       }
     ],

@@ -76,7 +76,7 @@ check(
   /^#FBFBFD$/i.test(String(window.backgroundColor ?? '')),
   window.backgroundColor,
 );
-check('тема окна светлая', window.theme === 'light', window.theme);
+check('тема окна светлая', window.theme === 'Light', window.theme);
 check('drag & drop файлов на окно включён', window.dragDropEnabled !== false);
 check('в конфиге нет упоминаний QR и мобильного приложения', !/QR|qr-код|apk/i.test(JSON.stringify(tauriConf)));
 
