@@ -56,17 +56,14 @@ jobs:
         # Вывод дублируется в аннотацию при падении: логи Actions в некоторых средах недоступны,
         # а имя упавшего теста должно быть видно прямо в сводке запуска.
         run: |
-          # shell по умолчанию идёт с `-e`: без `set +e` шаг упадёт раньше, чем напечатает хвост.
+          # shell по умолчанию идёт с `-e`: без `set +e` шаг упадёт раньше отчёта.
           set +e
-          set -o pipefail
-          npm test 2>&1 | tee vitest.log
+          npx vitest run --reporter=default --reporter=json --outputFile=vitest.json
           status=$?
-          if [ $status -ne 0 ]; then
-            tail -n 60 vitest.log | sed 's/%/%25/' | while IFS= read -r line; do
-              echo "::error title=vitest::${line}"
-            done
+          if [ "$status" -ne 0 ]; then
+            node scripts/ci-test-report.mjs vitest.json
           fi
-          exit $status
+          exit "$status"
 
       - name: Типы
         run: npm run typecheck
