@@ -306,10 +306,14 @@ export async function createAssemblyView(
   frameCamera();
 
   const groundY = box.min.y - diagonal * 0.02;
-  const grid = new THREE.GridHelper(diagonal * 2.4, 12, palette.grid, palette.grid);
-  grid.position.set(center.x, groundY, center.z);
-  (grid.material as THREE.Material).transparent = true;
-  (grid.material as THREE.Material).opacity = 0.55;
+  const makeGrid = (): THREE.GridHelper => {
+    const helper = new THREE.GridHelper(diagonal * 2.4, 12, palette.grid, palette.grid);
+    helper.position.set(center.x, groundY, center.z);
+    (helper.material as THREE.Material).transparent = true;
+    (helper.material as THREE.Material).opacity = 0.55;
+    return helper;
+  };
+  let grid = makeGrid();
   scene.add(grid);
 
   // ---- state --------------------------------------------------------------
@@ -437,16 +441,13 @@ export async function createAssemblyView(
       for (const visual of visuals.values()) {
         applyMaterials(visual);
       }
-      for (const material of [grid.material]) {
-        const items = Array.isArray(material) ? material : [material];
-        items.forEach((item) => item.dispose());
-      }
-      const nextGrid = new THREE.GridHelper(diagonal * 2.4, 12, palette.grid, palette.grid);
-      nextGrid.position.copy(grid.position);
-      (nextGrid.material as THREE.Material).transparent = true;
-      (nextGrid.material as THREE.Material).opacity = 0.55;
-      scene.remove(grid);
-      scene.add(nextGrid);
+      // Swap the ground grid for one in the new palette (and dispose the old one).
+      const previousGrid = grid;
+      (previousGrid.material as THREE.Material).dispose();
+      previousGrid.geometry.dispose();
+      scene.remove(previousGrid);
+      grid = makeGrid();
+      scene.add(grid);
     },
     resetCamera() {
       frameCamera();
