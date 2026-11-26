@@ -374,7 +374,8 @@ QR — нет, и диалог честно предлагает вкладку 
 - плагины `dialog` + `fs`; `src-tauri/src/lib.rs` отдаёт команды `print_sheet` (печать через `window.print()`
   в системный диалог) и `shell_version`;
 - capabilities (`src-tauri/capabilities/default.json`): `core:default`, `dialog:default/allow-open/allow-save`,
-  `fs:default` + чтение/запись текстовых файлов в `$HOME`, `$DESKTOP`, `$DOCUMENT`, `$DOWNLOAD`, `$TEMP`;
+  `fs:allow-read-text-file` + `fs:allow-write-text-file` со скоупом `$HOME`, `$DESKTOP`, `$DOCUMENT`,
+  `$DOWNLOAD`, `$TEMP` (никакого `fs:default` — только те две команды, которые реально нужны);
 - CSP: `script-src 'self'`, картинки — `data:`/`blob:`; `connect-src` разрешает любой `http(s)`, потому
   что адрес цехового сервера задаёт инженер (`192.168.x.y:8000`), и перечислить подсети в CSP нельзя.
   Компенсация: скрипты только свои, никакой внешней загрузки, а сам адрес виден и проверяем в настройках;

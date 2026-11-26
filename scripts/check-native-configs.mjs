@@ -162,7 +162,10 @@ check('main.rs скрывает консоль в release', mainRs.includes('win
 const capability = readJson(join(tauriDir, 'src-tauri/capabilities/default.json'));
 check('capabilities: окно main', (capability.windows ?? []).includes('main'));
 const permissions = (capability.permissions ?? []).map((entry) => (typeof entry === 'string' ? entry : entry.identifier));
-check('capabilities: dialog + fs', permissions.includes('dialog:default') && permissions.includes('fs:default'));
+check(
+  'capabilities: dialog + fs',
+  permissions.includes('dialog:default') && permissions.includes('fs:allow-read-text-file'),
+);
 check(
   'capabilities: чтение и запись текстовых файлов',
   permissions.includes('fs:allow-read-text-file') && permissions.includes('fs:allow-write-text-file'),

@@ -120,6 +120,29 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+
+      - name: Зависимости (нужен пакет yaml для разбора workflow-файлов)
+        run: npm ci
 
       - name: Validate every config file the release builds depend on
         run: node scripts/check-native-configs.mjs
+
+      - name: Python 3.11 (для строгого разбора Cargo.toml)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cargo.toml — корректный TOML и нужные ключи
+        run: |
+          python3 - <<'PY'
+          import pathlib, tomllib
+          data = tomllib.loads(pathlib.Path('apps/desktop-tauri/src-tauri/Cargo.toml').read_text(encoding='utf-8'))
+          package = data['package']
+          assert package['name'] == 'ikguide-studio', package
+          assert package['edition'] == '2021', package
+          assert 'tauri' in data['dependencies']
+          assert 'tauri-build' in data['build-dependencies']
+          assert 'cdylib' in data['lib']['crate-type']
+          print('Cargo.toml корректен:', package['name'], package['version'])
+          PY
