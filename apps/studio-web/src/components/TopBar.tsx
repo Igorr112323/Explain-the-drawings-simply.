@@ -40,6 +40,14 @@ export function TopBar() {
       </nav>
 
       <div className="top-actions">
+        <button
+          type="button"
+          className="capsule scan-capsule"
+          onClick={() => dispatch({ type: 'OPEN_SCAN', mode: 'files' })}
+          title="Сфотографировать или загрузить чертёж и получить черновик инструкции"
+        >
+          <span aria-hidden="true">📷</span> Чертёж → инструкция
+        </button>
         <label className="capsule doc-capsule">
           <span className="visually-hidden">Выбор инструкции</span>
           <select

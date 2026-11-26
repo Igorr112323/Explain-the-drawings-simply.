@@ -19,7 +19,8 @@
     "baseUrl": ".",
     "paths": {
       "@ikguide/schema": ["packages/ikguide-schema/src/index.ts"],
-      "@ikguide/gost-translator": ["packages/gost-translator/src/index.ts"]
+      "@ikguide/gost-translator": ["packages/gost-translator/src/index.ts"],
+      "@ikguide/builder": ["packages/ikguide-builder/src/index.ts"]
     }
   },
   "include": [

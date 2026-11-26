@@ -3,7 +3,8 @@ import { formatMm, parseDecimal } from '../format';
 import type { RecommendedTool, WeldTranslation } from '../types';
 
 const JOINT_PATTERN = /([СУТН])\s*(\d{1,2})(?:\s*-\s*[КK]\s*(\d+(?:[.,]\d+)?))?/;
-const STANDALONE_LEG_PATTERN = /^(?:катет\s*)?[КK]?\s*(\d+(?:[.,]\d+)?)(?:\s*мм)?$/;
+// A bare number is a dimension, not a weld: a leg is only «К5», «K5» or «катет 5».
+const STANDALONE_LEG_PATTERN = /^(?:катет\s*[КK]?\s*|[КK]\s*)(\d+(?:[.,]\d+)?)(?:\s*мм)?$/;
 const LEG_AFTER_JOINT_PATTERN = /-\s*[КK]\s*(\d+(?:[.,]\d+)?)/;
 const INTERMITTENT_PATTERN = /(\d+(?:[.,]\d+)?)\s*\/\s*(\d+(?:[.,]\d+)?)/;
 const CLOSED_CONTOUR_PATTERN = /замкнут|по\s+контуру|[◯○⌀∅]/;

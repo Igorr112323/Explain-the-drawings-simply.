@@ -16,8 +16,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "npm run build --workspaces --if-present",
-    "build:packages": "npm run build -w @ikguide/schema -w @ikguide/gost-translator"
+    "build": "npm run build:packages && npm run build -w @ikguide/studio-web",
+    "build:packages": "npm run build -w @ikguide/schema -w @ikguide/gost-translator -w @ikguide/builder",
+    "dev:vision": "bash services/vision-api/run.sh dev",
+    "install:vision": "bash services/vision-api/run.sh install",
+    "test:vision": "bash services/vision-api/run.sh test"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",

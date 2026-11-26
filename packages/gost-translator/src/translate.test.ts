@@ -8,6 +8,10 @@ describe('translateEngineeringNotation dispatcher', () => {
     expect(translateEngineeringNotation('Ø20 H7').kind).toBe('fit');
     expect(translateEngineeringNotation('Ra 1.6').kind).toBe('roughness');
     expect(translateEngineeringNotation('Т1-К5').kind).toBe('weld');
+    expect(translateEngineeringNotation('36').kind).toBe('dimension');
+    expect(translateEngineeringNotation('12').kind).toBe('dimension');
+    expect(translateEngineeringNotation('К5').kind).toBe('weld');
+    expect(translateEngineeringNotation('катет 6').kind).toBe('weld');
     expect(translateEngineeringNotation('2×45°').kind).toBe('chamfer');
     expect(translateEngineeringNotation('R3').kind).toBe('radius');
     expect(translateEngineeringNotation('4 отв. Ø6,5').kind).toBe('holeGroup');

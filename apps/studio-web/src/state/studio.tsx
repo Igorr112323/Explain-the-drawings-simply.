@@ -17,6 +17,7 @@ import {
   type XrayAnnotation,
 } from '@ikguide/schema';
 import { DEMO_DOCUMENTS } from '../data/demos';
+import type { VisionCandidate, VisionSession } from '../lib/vision';
 
 export type StudioMode = 'worker' | 'engineer';
 export type WorkerScreen = 'home' | 'verify' | 'prep' | 'steps' | 'xray' | 'qc' | 'done';
@@ -26,6 +27,12 @@ export interface ToastMessage {
   id: number;
   text: string;
   tone: 'info' | 'success' | 'danger';
+}
+
+export interface ScanRequest {
+  open: boolean;
+  mode: 'files' | 'camera';
+  files: File[];
 }
 
 export interface StudioState {
@@ -40,6 +47,9 @@ export interface StudioState {
   toast: ToastMessage | null;
   focusedAnnotationId: string | null;
   manualNotation: string;
+  scan: ScanRequest;
+  /** Recognition session does not survive a reload on purpose: the sheet images are large. */
+  vision: VisionSession | null;
 }
 
 export type StudioAction =
@@ -57,7 +67,14 @@ export type StudioAction =
   | { type: 'SHOW_TOAST'; text: string; tone: ToastMessage['tone'] }
   | { type: 'CLEAR_TOAST' }
   | { type: 'FOCUS_ANNOTATION'; annotationId: string | null }
-  | { type: 'SET_MANUAL_NOTATION'; value: string };
+  | { type: 'SET_MANUAL_NOTATION'; value: string }
+  | { type: 'OPEN_SCAN'; mode: 'files' | 'camera'; files?: File[] }
+  | { type: 'CLOSE_SCAN' }
+  | { type: 'SET_VISION_SESSION'; session: VisionSession; image: string | null }
+  | { type: 'SET_VISION_DRAFT'; doc: IkGuideDocument }
+  | { type: 'ADD_VISION_CANDIDATES'; candidates: VisionCandidate[]; warnings?: string[] }
+  | { type: 'ADD_MANUAL_NOTATION'; value: string }
+  | { type: 'CLEAR_VISION' };
 
 const STORAGE_KEY = 'ikguide.studio.v1';
 
@@ -92,6 +109,8 @@ function initialState(): StudioState {
     toast: null,
     focusedAnnotationId: null,
     manualNotation: '',
+    scan: { open: false, mode: 'files', files: [] },
+    vision: null,
   };
 
   if (typeof window === 'undefined') {
@@ -192,6 +211,69 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, focusedAnnotationId: action.annotationId };
     case 'SET_MANUAL_NOTATION':
       return { ...state, manualNotation: action.value };
+    case 'OPEN_SCAN':
+      return {
+        ...state,
+        scan: { open: true, mode: action.mode, files: action.files ?? [] },
+      };
+    case 'CLOSE_SCAN':
+      return { ...state, scan: { open: false, mode: state.scan.mode, files: [] } };
+    case 'SET_VISION_SESSION':
+      return {
+        ...state,
+        vision: action.session,
+        uploadedImage: action.image ?? state.uploadedImage,
+        focusedAnnotationId: null,
+      };
+    case 'SET_VISION_DRAFT': {
+      const previousDraftId = state.vision?.draftDocId ?? null;
+      const docs = [...state.docs.filter((doc) => doc.id !== action.doc.id && doc.id !== previousDraftId), action.doc];
+      return {
+        ...state,
+        docs,
+        activeDocId: action.doc.id,
+        stepIndex: 0,
+        vision: state.vision ? { ...state.vision, draftDocId: action.doc.id } : state.vision,
+      };
+    }
+    case 'ADD_VISION_CANDIDATES': {
+      if (!state.vision) {
+        return state;
+      }
+      const known = new Set(state.vision.candidates.map((candidate) => candidate.id));
+      const fresh = action.candidates.filter((candidate) => !known.has(candidate.id));
+      if (fresh.length === 0) {
+        return state;
+      }
+      return {
+        ...state,
+        vision: {
+          ...state.vision,
+          candidates: [...state.vision.candidates, ...fresh],
+          warnings: [...new Set([...state.vision.warnings, ...(action.warnings ?? [])])],
+        },
+      };
+    }
+    case 'ADD_MANUAL_NOTATION': {
+      if (!state.vision) {
+        return state;
+      }
+      const value = action.value.trim();
+      if (value.length === 0) {
+        return state;
+      }
+      if (state.vision.manualNotations.includes(value)) {
+        // Already in the draft: just clear the field so the engineer can type the next cipher.
+        return { ...state, manualNotation: '' };
+      }
+      return {
+        ...state,
+        vision: { ...state.vision, manualNotations: [...state.vision.manualNotations, value] },
+        manualNotation: '',
+      };
+    }
+    case 'CLEAR_VISION':
+      return { ...state, vision: null, uploadedImage: null };
     default:
       return state;
   }

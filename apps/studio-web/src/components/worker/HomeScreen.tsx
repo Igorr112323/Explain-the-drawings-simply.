@@ -1,15 +1,13 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { documentStats, parseDocumentJson, type IkGuideDocument } from '@ikguide/schema';
 import { useStudio } from '../../state/studio';
-import { readDataUrl, readTextFile } from '../../lib/download';
+import { readTextFile } from '../../lib/download';
 import { WorkerHeader, SectionTitle } from './WorkerChrome';
 import { QrDialog } from '../common/QrDialog';
 import { BomGlyph } from '../common/Glyphs';
 
 export function HomeScreen() {
   const { state, dispatch, doc, stats, unconfirmed } = useStudio();
-  const cameraInput = useRef<HTMLInputElement>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
   const [qrOpen, setQrOpen] = useState(false);
 
   const openDoc = (item: IkGuideDocument, screen: 'prep' | 'xray') => {
@@ -17,20 +15,6 @@ export function HomeScreen() {
     dispatch({ type: 'SET_SCREEN', screen });
   };
 
-  const handleImage = async (file: File) => {
-    try {
-      const dataUrl = await readDataUrl(file);
-      dispatch({ type: 'SET_UPLOADED_IMAGE', src: dataUrl });
-      dispatch({ type: 'SET_SCREEN', screen: 'xray' });
-      dispatch({
-        type: 'SHOW_TOAST',
-        tone: 'info',
-        text: 'Чертёж загружен. Автораспознавание появится на этапе 2 — пока проверяйте шифры вручную на экране «Рентген».',
-      });
-    } catch (error) {
-      dispatch({ type: 'SHOW_TOAST', tone: 'danger', text: error instanceof Error ? error.message : 'Не удалось прочитать файл' });
-    }
-  };
 
   const handleGuideFile = async (file: File) => {
     try {
@@ -51,12 +35,12 @@ export function HomeScreen() {
     if (!file) {
       return;
     }
-    const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|webp|heic|bmp)$/i.test(file.name);
-    if (isImage) {
-      await handleImage(file);
-    } else {
+    const isGuide = file.type === 'application/json' || /\.json$/i.test(file.name);
+    if (isGuide) {
       await handleGuideFile(file);
+      return;
     }
+    dispatch({ type: 'OPEN_SCAN', mode: 'files', files: [file] });
   };
 
   return (
@@ -144,38 +128,36 @@ export function HomeScreen() {
       </ul>
 
       <div className="home-capsule">
-        <button type="button" className="capsule-action capsule-primary" onClick={() => cameraInput.current?.click()}>
+        <button
+          type="button"
+          className="capsule-action capsule-primary"
+          onClick={() => dispatch({ type: 'OPEN_SCAN', mode: 'camera' })}
+        >
           📷 Сфоткать
         </button>
-        <button type="button" className="capsule-action" onClick={() => fileInput.current?.click()}>
+        <button
+          type="button"
+          className="capsule-action"
+          onClick={() => dispatch({ type: 'OPEN_SCAN', mode: 'files' })}
+        >
           📎 Загрузить
         </button>
         <button type="button" className="capsule-action" onClick={() => setQrOpen(true)}>
           ▦ QR-код
         </button>
+        <label className="capsule-action capsule-file">
+          ↧ Инструкция
+          <input
+            type="file"
+            accept=".json,application/json"
+            hidden
+            onChange={(event) => {
+              void onFilePicked(event.target.files?.[0]);
+              event.target.value = '';
+            }}
+          />
+        </label>
       </div>
-
-      <input
-        ref={cameraInput}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        hidden
-        onChange={(event) => {
-          void onFilePicked(event.target.files?.[0]);
-          event.target.value = '';
-        }}
-      />
-      <input
-        ref={fileInput}
-        type="file"
-        accept="image/*,.json,application/json"
-        hidden
-        onChange={(event) => {
-          void onFilePicked(event.target.files?.[0]);
-          event.target.value = '';
-        }}
-      />
 
       {qrOpen ? <QrDialog doc={doc} onClose={() => setQrOpen(false)} /> : null}
     </div>

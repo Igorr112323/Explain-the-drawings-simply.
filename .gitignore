@@ -12,3 +12,10 @@ coverage/
 src-tauri/target/
 android/.gradle/
 android/app/build/
+
+# Python vision service
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+services/vision-api/.venv/

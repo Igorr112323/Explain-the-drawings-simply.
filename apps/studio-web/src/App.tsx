@@ -4,9 +4,10 @@ import { WorkerPhone } from './components/worker/WorkerPhone';
 import { EngineerCanvas } from './components/engineer/EngineerCanvas';
 import { PrintSheet } from './components/engineer/PrintSheet';
 import { ToastHost } from './components/ToastHost';
+import { ScanDialog } from './components/common/ScanDialog';
 
 function StudioShell() {
-  const { state } = useStudio();
+  const { state, dispatch } = useStudio();
 
   return (
     <>
@@ -14,6 +15,9 @@ function StudioShell() {
         <TopBar />
         <main className="stage">{state.mode === 'worker' ? <WorkerPhone /> : <EngineerCanvas />}</main>
         <ToastHost />
+        {state.scan.open ? (
+          <ScanDialog mode={state.scan.mode} files={state.scan.files} onClose={() => dispatch({ type: 'CLOSE_SCAN' })} />
+        ) : null}
       </div>
       <PrintSheet />
     </>
