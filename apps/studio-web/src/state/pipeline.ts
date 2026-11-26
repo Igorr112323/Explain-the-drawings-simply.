@@ -53,7 +53,12 @@ export interface PipelineState {
   error: { message: string; hint: string } | null;
   pdfBusy: boolean;
   pdfJob: PdfJob | null;
+  /** Снимки документа до каждой правки: по ним работает кнопка «Отменить». */
+  history: IkGuideDocument[];
 }
+
+/** Сколько шагов правки помним: больше не нужно, а память не бесконечная. */
+const HISTORY_LIMIT = 40;
 
 const INITIAL: PipelineState = {
   stage: 'upload',
@@ -69,6 +74,7 @@ const INITIAL: PipelineState = {
   error: null,
   pdfBusy: false,
   pdfJob: null,
+  history: [],
 };
 
 const PHASE_PERCENT = { reading: 0.12, recognizing: 0.4, building: 0.72, ready: 0.92 } as const;
@@ -87,6 +93,7 @@ export interface PipelineActions {
   editAnnotationNote(annotationId: string, note: string): void;
   editChecklistText(itemId: string, text: string): void;
   toggleChecklistItem(itemId: string): void;
+  undo(): void;
   download(): Promise<void>;
 }
 
@@ -94,6 +101,8 @@ export interface PipelineApi extends PipelineState {
   illustrations: Illustrations;
   ambiguous: AmbiguousSize[];
   softNotes: AmbiguousSize[];
+  /** Есть ли что отменять. */
+  canUndo: boolean;
   actions: PipelineActions;
 }
 
@@ -199,7 +208,36 @@ export function usePipeline(): PipelineApi {
   const reset = useCallback(() => setState(INITIAL), []);
 
   const mutate = useCallback((fn: (doc: IkGuideDocument) => IkGuideDocument) => {
-    setState((prev) => (prev.doc ? { ...prev, doc: fn(prev.doc), pdfJob: null } : prev));
+    setState((prev) =>
+      prev.doc
+        ? {
+            ...prev,
+            doc: fn(prev.doc),
+            pdfJob: null,
+            history: [...prev.history, prev.doc].slice(-HISTORY_LIMIT),
+          }
+        : prev,
+    );
+  }, []);
+
+  /**
+   * Отмена — это возврат к снимку документа до последней правки. Снимки неизменяемы, поэтому
+   * достаточно отдать предыдущий: ROI-пины, шаги и чек-лист вернутся вместе.
+   */
+  const undo = useCallback(() => {
+    setState((prev) => {
+      const previous = prev.history[prev.history.length - 1];
+      if (!prev.doc || !previous) {
+        return prev;
+      }
+      return {
+        ...prev,
+        doc: previous,
+        history: prev.history.slice(0, -1),
+        pdfJob: null,
+        pdfBusy: false,
+      };
+    });
   }, []);
 
   const actions = useMemo<PipelineActions>(
@@ -217,6 +255,7 @@ export function usePipeline(): PipelineApi {
       editAnnotationNote: (annotationId, note) => mutate((doc) => setAnnotationNote(doc, annotationId, note)),
       editChecklistText: (itemId, text) => mutate((doc) => setChecklistText(doc, itemId, text)),
       toggleChecklistItem: (itemId) => mutate((doc) => toggleChecklistRequired(doc, itemId)),
+      undo,
       download: async () => {
         const current = docRef.current;
         if (!current) {
@@ -247,7 +286,7 @@ export function usePipeline(): PipelineApi {
         }
       },
     }),
-    [mutate, openExample, reset, start],
+    [mutate, openExample, reset, start, undo],
   );
 
   const illustrations = useMemo(
@@ -260,5 +299,5 @@ export function usePipeline(): PipelineApi {
   const ambiguous = useMemo(() => (state.doc ? ambiguousSizes(state.doc) : []), [state.doc]);
   const softNotes = useMemo(() => (state.doc ? lowConfidenceNotes(state.doc) : []), [state.doc]);
 
-  return { ...state, illustrations, ambiguous, softNotes, actions };
+  return { ...state, illustrations, ambiguous, softNotes, canUndo: state.history.length > 0, actions };
 }

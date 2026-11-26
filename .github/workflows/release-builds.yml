@@ -1,8 +1,18 @@
-name: Release builds
+name: Build Windows .exe
 
 # Здесь и только здесь появляется настоящий `.exe`: в песочнице разработки нет Rust.
-# Запуск — вручную (Actions → Release builds → Run workflow) или тегом v1.0.0: тег
-# дополнительно прикрепляет собранные файлы к GitHub Release.
+# Запуск в один клик: Actions → «Build Windows .exe» → Run workflow. По тегу v* файлы ещё и
+# прикрепляются к GitHub Release.
+#
+# Что собирается:
+#   1. checks               — тесты, типы, веб-бандл, проверка нативных конфигов (быстро, Linux);
+#   2. build-windows-exe    — IKGuide Studio: установщик NSIS + переносимый .exe (Windows);
+#   3. build-engine-windows — локальный движок (vision + cad) в виде двух .exe через PyInstaller;
+#   4. build-portable-backend — архив с Python-сервисами и скриптом запуска (запасной путь).
+#
+# Джоб движка помечен `continue-on-error: true`: если PyInstaller на новой версии зависимости
+# споткнётся, сам продукт (UI + установщик) всё равно соберётся и выгрузится в Artifacts.
+
 on:
   push:
     tags:
@@ -23,6 +33,7 @@ concurrency:
 
 env:
   NODE_VERSION: '20'
+  PYTHON_VERSION: '3.11'
 
 jobs:
   # ---------------------------------------------------------------- Проверки
@@ -55,7 +66,7 @@ jobs:
 
   # ---------------------------------------------------------------- Windows .exe
   build-windows-exe:
-    name: Windows .exe (Tauri v2)
+    name: Windows .exe (установщик + portable)
     needs: checks
     runs-on: windows-latest
     steps:
@@ -94,18 +105,26 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ''
 
-      - name: Собрать артефакты
+      - name: Разложить артефакты
+        shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          Copy-Item "apps/desktop-tauri/src-tauri/target/release/ikguide-studio.exe" "artifacts/ikguide-studio-windows.exe"
-          Get-ChildItem "apps/desktop-tauri/src-tauri/target/release/bundle/nsis/*.exe" | ForEach-Object { Copy-Item $_.FullName "artifacts/ikguide-studio-setup.exe" }
-        shell: pwsh
+          # Переносимый вариант: один .exe, без установки (WebView2 уже есть в Windows 10/11).
+          Copy-Item "apps/desktop-tauri/src-tauri/target/release/ikguide-studio.exe" "artifacts/IKGuide-Studio-Portable.exe"
+          # Установщик: NSIS собирает «IKGuide Studio_<версия>_x64-setup.exe».
+          $nsis = Get-ChildItem "apps/desktop-tauri/src-tauri/target/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if (-not $nsis) { throw "NSIS-установщик не собрался" }
+          Copy-Item $nsis.FullName "artifacts/IKGuide-Studio-Setup.exe"
+          # MSI — для доменных машин, где MSI разворачивают групповой политикой.
+          $msi = Get-ChildItem "apps/desktop-tauri/src-tauri/target/release/bundle/msi/*.msi" | Select-Object -First 1
+          if ($msi) { Copy-Item $msi.FullName "artifacts/IKGuide-Studio.msi" }
+          Get-ChildItem artifacts | Select-Object Name, Length
 
       - name: Артефакт ikguide-studio-windows
         uses: actions/upload-artifact@v4
         with:
           name: ikguide-studio-windows
-          path: artifacts/*.exe
+          path: artifacts/*
           if-no-files-found: error
           retention-days: 30
 
@@ -113,8 +132,72 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.exe
+          files: artifacts/*
           fail_on_unmatched_files: false
+
+  # -------------------------------------------- Локальный движок (два .exe, PyInstaller)
+  build-engine-windows:
+    name: Движок Python (PyInstaller)
+    runs-on: windows-latest
+    # Тяжёлая и капризная упаковка не должна блокировать выпуск UI-сборки.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Зависимости движка + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r services/vision-api/requirements.txt
+          python -m pip install -r services/cad-api/requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Собрать ikguide-vision.exe
+        working-directory: services/vision-api
+        run: >
+          python -m PyInstaller --noconfirm --onefile --name ikguide-vision
+          --paths . --collect-submodules app
+          --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto
+          --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto
+          --hidden-import uvicorn.lifespan.on
+          engine_entry.py
+
+      - name: Собрать ikguide-cad.exe
+        working-directory: services/cad-api
+        run: >
+          python -m PyInstaller --noconfirm --onefile --name ikguide-cad
+          --paths . --collect-submodules app
+          --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto
+          --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto
+          --hidden-import uvicorn.lifespan.on
+          engine_entry.py
+
+      - name: Сложить движок в папку engine
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/engine | Out-Null
+          Copy-Item services/vision-api/dist/ikguide-vision.exe artifacts/engine/
+          Copy-Item services/cad-api/dist/ikguide-cad.exe artifacts/engine/
+          @'
+          IKGuide Studio: локальный движок
+          ================================
+          Положите папку engine рядом с IKGuide-Studio-Portable.exe (или в папку установки
+          установщика) — приложение само запустит оба сервиса в фоне, без окна консоли.
+          Порт 8000 — распознавание чертежа, порт 8001 — 3D-модели. Слушают только 127.0.0.1.
+          '@ | Set-Content -Encoding UTF8 artifacts/engine/ПРОЧТИ-МЕНЯ.txt
+          Get-ChildItem artifacts/engine
+
+      - name: Артефакт ikguide-engine-windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: ikguide-engine-windows
+          path: artifacts/engine/*
+          if-no-files-found: warn
+          retention-days: 30
 
   # ------------------------------------------------- Локальный бэкенд (архив)
   build-portable-backend:
@@ -164,20 +247,25 @@ jobs:
   # ----------------------------------------------------------------- Сводка
   summary:
     name: Итог
-    needs: [checks, build-windows-exe, build-portable-backend]
+    needs: [checks, build-windows-exe, build-engine-windows, build-portable-backend]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Сводка релиза
         run: |
           {
-            echo "## Сборки IkGuide"
+            echo "## Сборки IkGuide Studio"
             echo ""
             echo "| Что | Статус |"
             echo "| --- | --- |"
             echo "| Тесты, типы, сборка | ${{ needs.checks.result }} |"
-            echo "| Windows .exe (Tauri v2) | ${{ needs.build-windows-exe.result }} |"
+            echo "| Windows .exe (установщик + portable) | ${{ needs.build-windows-exe.result }} |"
+            echo "| Движок Python (PyInstaller, не блокирует .exe) | ${{ needs.build-engine-windows.result }} |"
             echo "| Локальный бэкенд (архив) | ${{ needs.build-portable-backend.result }} |"
             echo ""
             echo "Готовые файлы — в разделе **Artifacts** этого запуска (и в Release, если запуск по тегу)."
+            echo ""
+            echo "**Как запустить на чистой Windows:** распакуйте \`ikguide-studio-windows\` и \`ikguide-engine-windows\`,"
+            echo "положите папку \`engine\` рядом с \`IKGuide-Studio-Portable.exe\` (или в папку установки) —"
+            echo "приложение само поднимет движок без окна консоли."
           } >> "$GITHUB_STEP_SUMMARY"

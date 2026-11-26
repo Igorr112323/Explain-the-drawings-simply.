@@ -1,39 +1,56 @@
 /**
- * Живой предпросмотр листа A4 «как в файле».
+ * Лист A4 будущего PDF прямо на холсте — «как в файле».
  *
  * Блоки плана — те же самые, что получает jsPDF: координаты в миллиметрах, кегль в пунктах.
  * Поэтому лист рисуется реального размера 210×297 мм и масштабируется целиком через `transform`,
- * а не пересчитывается в пиксели по частям. Итог: переносы строк и отступы совпадают с PDF.
+ * а не пересчитывается в пиксели по частям. Итог: переносы строк и отступы совпадают с PDF, а клик
+ * по названию, тексту шага или схеме открывает правку ровно того поля, что напечатано.
  */
-import { useEffect, useRef, useState } from 'react';
-import { PAGE, type PlanBlock, type PlanPage } from '@ikguide/pdf-exporter';
+import { PAGE, type PlanBlock, type PlanPage, type PlanTarget } from '@ikguide/pdf-exporter';
 
-const MIN_SCALE = 0.32;
-const MAX_SCALE = 1;
-const FALLBACK_WIDTH = 700;
+/** Пикселей в миллиметре при 96 dpi — так лист на экране того же размера, что и на бумаге. */
+const PX_PER_MM = 3.7795;
 
-function Block({ block }: { block: PlanBlock }) {
+const blockTarget = (block: PlanBlock): PlanTarget | undefined =>
+  'target' in block ? (block.target as PlanTarget | undefined) : undefined;
+
+function TextBlock({ block, onTarget }: { block: Extract<PlanBlock, { kind: 'text' }>; onTarget?: (target: PlanTarget) => void }) {
+  const target = blockTarget(block);
+  const style = {
+    left: `${block.x}mm`,
+    top: `${block.y}mm`,
+    width: `${block.w}mm`,
+    fontSize: `${block.size}pt`,
+    lineHeight: 1.28,
+    color: block.color,
+    textAlign: block.align,
+  } as const;
+  const body = block.lines.map((line, index) => (
+    <span key={`${block.y}-${index}`} className="pv-line">
+      {line || '\u00a0'}
+    </span>
+  ));
+
+  if (!target || !onTarget) {
+    return <div className={`pv-text pv-weight-${block.weight}`} style={style}>{body}</div>;
+  }
+  return (
+    <button
+      type="button"
+      className={`pv-text pv-weight-${block.weight} pv-editable`}
+      style={style}
+      onClick={() => onTarget(target)}
+      title="Изменить на листе"
+      aria-label={`Изменить: ${block.lines.join(' ').slice(0, 60)}`}
+    >
+      {body}
+    </button>
+  );
+}
+
+function Block({ block, onTarget }: { block: PlanBlock; onTarget?: (target: PlanTarget) => void }) {
   if (block.kind === 'text') {
-    return (
-      <div
-        className={`pv-text pv-weight-${block.weight}`}
-        style={{
-          left: `${block.x}mm`,
-          top: `${block.y}mm`,
-          width: `${block.w}mm`,
-          fontSize: `${block.size}pt`,
-          lineHeight: 1.28,
-          color: block.color,
-          textAlign: block.align,
-        }}
-      >
-        {block.lines.map((line, index) => (
-          <div key={`${block.y}-${index}`} className="pv-line">
-            {line || '\u00a0'}
-          </div>
-        ))}
-      </div>
-    );
+    return <TextBlock block={block} onTarget={onTarget} />;
   }
   if (block.kind === 'rect') {
     return (
@@ -66,84 +83,66 @@ function Block({ block }: { block: PlanBlock }) {
       />
     );
   }
-  if (block.kind === 'svg') {
-    return (
-      <div
-        className="pv-svg"
-        style={{ left: `${block.x}mm`, top: `${block.y}mm`, width: `${block.w}mm`, height: `${block.h}mm` }}
-        // Разметку строит собственный детерминированный SVG-рендерер (`ikeaSvg`/art), не пользователь.
-        dangerouslySetInnerHTML={{ __html: block.markup }}
-      />
-    );
-  }
+
+  const target = blockTarget(block);
+  const frame = {
+    left: `${block.x}mm`,
+    top: `${block.y}mm`,
+    width: `${block.w}mm`,
+    height: `${block.h}mm`,
+  } as const;
+
   return (
-    <img
-      className="pv-image"
-      src={block.dataUrl}
-      alt=""
-      style={{ left: `${block.x}mm`, top: `${block.y}mm`, width: `${block.w}mm`, height: `${block.h}mm` }}
-    />
+    <>
+      {block.kind === 'svg' ? (
+        <div
+          className="pv-svg"
+          style={frame}
+          // Разметку строит собственный детерминированный SVG-рендерер (`ikeaSvg`/art), не пользователь.
+          dangerouslySetInnerHTML={{ __html: block.markup }}
+        />
+      ) : (
+        <img className="pv-image" src={block.dataUrl} alt="" style={frame} />
+      )}
+      {target && onTarget && (
+        <button
+          type="button"
+          className="pv-overlay"
+          style={frame}
+          onClick={() => onTarget(target)}
+          title="Изменить схему"
+          aria-label="Изменить схему на листе"
+        />
+      )}
+    </>
   );
-}
-
-/** Ширина листа подстраивается под колонку, но в пределах читаемости. */
-function useFitScale(reference: React.RefObject<HTMLDivElement>) {
-  const [scale, setScale] = useState(0.78);
-
-  useEffect(() => {
-    const element = reference.current;
-    if (!element) {
-      return;
-    }
-    const measure = () => {
-      const width = element.clientWidth || FALLBACK_WIDTH;
-      const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, width / (PAGE.width * 3.7795)));
-      setScale(next);
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', measure);
-      return () => window.removeEventListener('resize', measure);
-    }
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [reference]);
-
-  return scale;
 }
 
 export function PagePreview({
   page,
   total,
-  title,
-  scale: fixedScale,
+  scale,
+  onTarget,
 }: {
   page: PlanPage;
   total: number;
-  title: string;
-  scale?: number;
+  scale: number;
+  onTarget?: (target: PlanTarget) => void;
 }) {
-  const host = useRef<HTMLDivElement>(null);
-  const fitted = useFitScale(host);
-  const scale = fixedScale ?? fitted;
-
   return (
-    <figure className="page-figure">
-      <div ref={host} className="page-slot" style={{ width: '100%' }}>
-        <div
-          className="page-frame"
-          style={{ width: `${PAGE.width * 3.7795 * scale}px`, height: `${PAGE.height * 3.7795 * scale}px` }}
-        >
-          <div className="page" style={{ transform: `scale(${scale})` }}>
-            {page.blocks.map((block, index) => (
-              <Block key={`${page.index}-${index}-${block.kind}`} block={block} />
-            ))}
-          </div>
+    <figure className="page-figure" aria-label={`Страница ${page.index + 1} из ${total}`}>
+      <div
+        className="page-frame"
+        style={{ width: `${PAGE.width * PX_PER_MM * scale}px`, height: `${PAGE.height * PX_PER_MM * scale}px` }}
+      >
+        <div className="page" style={{ transform: `scale(${scale})` }}>
+          {page.blocks.map((block, index) => (
+            <Block key={`${page.index}-${index}-${block.kind}`} block={block} onTarget={onTarget} />
+          ))}
         </div>
       </div>
       <figcaption className="page-caption">
-        Стр. {page.index + 1} из {total} · {title}
+        Стр. {page.index + 1} из {total}
       </figcaption>
     </figure>
   );

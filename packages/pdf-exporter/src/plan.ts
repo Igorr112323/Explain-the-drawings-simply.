@@ -37,6 +37,21 @@ export const COLORS = {
 
 export type Align = 'left' | 'right' | 'center';
 
+/**
+ * Адрес «что именно тут написано» у блока плана.
+ *
+ * Нужен живому холсту: лист A4 на экране — это тот же план, что уходит в PDF, поэтому клик по
+ * названию или абзацу шага прямо на листе открывает правку ровно того поля документа. В самом PDF
+ * никаких адресов нет — jsPDF их просто не рисует.
+ */
+export type PlanTarget =
+  | { type: 'title' }
+  | { type: 'step-title'; stepId: string }
+  | { type: 'step-text'; stepId: string }
+  | { type: 'step-anti'; stepId: string }
+  | { type: 'step-illustration'; stepId: string }
+  | { type: 'notation'; annotationId: string };
+
 export interface PlanText {
   kind: 'text';
   x: number;
@@ -47,6 +62,8 @@ export interface PlanText {
   weight: FontWeight;
   color: string;
   align: Align;
+  /** Поле документа, которое правится кликом по этому тексту на экране. */
+  target?: PlanTarget;
 }
 
 export interface PlanRect {
@@ -78,6 +95,7 @@ export interface PlanSvg {
   w: number;
   h: number;
   markup: string;
+  target?: PlanTarget;
 }
 
 export interface PlanImage {
@@ -162,6 +180,7 @@ interface TextStyle {
   weight?: FontWeight;
   color?: string;
   align?: Align;
+  target?: PlanTarget;
 }
 
 function text(flow: Flow, x: number, y: number, width: number, value: string, style: TextStyle): number {
@@ -177,6 +196,7 @@ function text(flow: Flow, x: number, y: number, width: number, value: string, st
     weight,
     color: style.color ?? COLORS.ink,
     align: style.align ?? 'left',
+    ...(style.target ? { target: style.target } : {}),
   });
   return blockHeight(lines, style.size);
 }
@@ -214,6 +234,7 @@ function illustration(
   h: number,
   input: IllustrationInput | undefined,
   fallbackLabel: string,
+  target?: PlanTarget,
 ): void {
   rect(flow, x, y, w, h, { fill: COLORS.chip, radius: 3 });
   if (input?.imageDataUrl) {
@@ -221,7 +242,15 @@ function illustration(
     return;
   }
   if (input?.svg) {
-    flow.add({ kind: 'svg', x: x + 2.5, y: y + 2.5, w: w - 5, h: h - 5, markup: input.svg });
+    flow.add({
+      kind: 'svg',
+      x: x + 2.5,
+      y: y + 2.5,
+      w: w - 5,
+      h: h - 5,
+      markup: input.svg,
+      ...(target ? { target } : {}),
+    });
     return;
   }
   text(flow, x + 6, y + h / 2 - 5, w - 12, fallbackLabel, {
@@ -374,7 +403,11 @@ function coverBlocks(flow: Flow, doc: IkGuideDocument, options: PlanOptions): vo
   flow.advance(lineHeight(7.5) + 2.5);
 
   const titleLines = wrapText(metadata.title, PAGE.contentWidth, 21, 'bold');
-  text(flow, PAGE.margin, flow.y, PAGE.contentWidth, metadata.title, { size: 21, weight: 'bold' });
+  text(flow, PAGE.margin, flow.y, PAGE.contentWidth, metadata.title, {
+    size: 21,
+    weight: 'bold',
+    target: { type: 'title' },
+  });
   flow.advance(blockHeight(titleLines, 21) + 1.5);
 
   const meta = [
@@ -445,6 +478,7 @@ function coverBlocks(flow: Flow, doc: IkGuideDocument, options: PlanOptions): vo
 
 interface GlossaryRow {
   raw: string;
+  annotationId: string | null;
   explanation: string;
   note: string | null;
   height: number;
@@ -468,6 +502,7 @@ function buildGlossary(doc: IkGuideDocument, explain: (raw: string) => string): 
     const note = annotation.confirmedByHuman ? null : 'проверить по чертежу';
     rows.push({
       raw,
+      annotationId: annotation.id,
       explanation,
       note,
       rawLines,
@@ -488,6 +523,7 @@ function buildGlossary(doc: IkGuideDocument, explain: (raw: string) => string): 
       const explanationLines = wrapText(explanation, 122, 8.4, 'normal');
       rows.push({
         raw,
+        annotationId: null,
         explanation,
         note: null,
         rawLines,
@@ -512,7 +548,11 @@ function drawGlossary(flow: Flow, rows: GlossaryRow[]): void {
       if (row.height > flow.remaining && flow.y > PAGE.bodyTop + 12) {
         break;
       }
-      text(flow, PAGE.margin, flow.y, 40, row.rawLines.join(' '), { size: 9, weight: 'bold' });
+      text(flow, PAGE.margin, flow.y, 40, row.rawLines.join(' '), {
+        size: 9,
+        weight: 'bold',
+        ...(row.annotationId ? { target: { type: 'notation' as const, annotationId: row.annotationId } } : {}),
+      });
       const explanationHeight = text(flow, PAGE.margin + 46, flow.y, 122, row.explanationLines.join(' '), {
         size: 8.4,
         color: COLORS.ink,
@@ -592,6 +632,7 @@ function drawStep(flow: Flow, layout: StepLayout, input: IllustrationInput | und
   text(flow, PAGE.margin + 20, top + 1.5, PAGE.contentWidth - 20, step.title, {
     size: 12.5,
     weight: 'bold',
+    target: { type: 'step-title', stepId: step.id },
   });
   text(flow, PAGE.margin + 20, top + 1.5 + blockHeight(layout.titleLines, 12.5) + 0.6, 60, minutesLabel(step), {
     size: 7.5,
@@ -599,10 +640,16 @@ function drawStep(flow: Flow, layout: StepLayout, input: IllustrationInput | und
   });
 
   let y = top + blockHeight(layout.titleLines, 12.5) + 4;
-  illustration(flow, PAGE.margin, y, ILLUSTRATION_W, ILLUSTRATION_H, input, 'Схема шага');
+  illustration(flow, PAGE.margin, y, ILLUSTRATION_W, ILLUSTRATION_H, input, 'Схема шага', {
+    type: 'step-illustration',
+    stepId: step.id,
+  });
   const textX = PAGE.margin + ILLUSTRATION_W + 8;
   const textWidth = PAGE.contentWidth - ILLUSTRATION_W - 8;
-  const textHeight = text(flow, textX, y, textWidth, step.workerText, { size: 8.6 });
+  const textHeight = text(flow, textX, y, textWidth, step.workerText, {
+    size: 8.6,
+    target: { type: 'step-text', stepId: step.id },
+  });
   if (layout.caption) {
     text(flow, textX, y + textHeight + 1, textWidth, layout.caption, { size: 7, color: COLORS.gray });
   }
@@ -634,8 +681,12 @@ function drawStep(flow: Flow, layout: StepLayout, input: IllustrationInput | und
       size: 7.5,
       weight: 'bold',
       color: COLORS.danger,
+      target: { type: 'step-anti', stepId: step.id },
     });
-    text(flow, PAGE.margin + 4, y + 7.5, PAGE.contentWidth - 8, step.antiError.text, { size: 8.4 });
+    text(flow, PAGE.margin + 4, y + 7.5, PAGE.contentWidth - 8, step.antiError.text, {
+      size: 8.4,
+      target: { type: 'step-anti', stepId: step.id },
+    });
     y += height + 2;
   }
 

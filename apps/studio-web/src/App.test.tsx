@@ -90,7 +90,7 @@ function jsonResponse(payload: unknown, status = 200) {
   } as unknown as Response;
 }
 
-const flush = async (times = 6) => {
+const flush = async (times = 8) => {
   for (let index = 0; index < times; index += 1) {
     await act(async () => {
       await Promise.resolve();
@@ -105,13 +105,23 @@ async function render() {
   await act(async () => {
     root?.render(<App />);
   });
+  await flush();
   return container;
 }
 
 const text = () => container.textContent ?? '';
+const all = (selector: string) => Array.from(container.querySelectorAll(selector));
 
-function buttons() {
-  return Array.from(container.querySelectorAll('button'));
+function buttonsIn(scope: ParentNode) {
+  return Array.from(scope.querySelectorAll('button'));
+}
+
+function byLabel(label: string, scope: ParentNode = container) {
+  const element = scope.querySelector(`[aria-label="${label}"]`);
+  if (!element) {
+    throw new Error(`Элемент «${label}» не найден. Подписи: ${all('[aria-label]').map((node) => node.getAttribute('aria-label')).join(' | ')}`);
+  }
+  return element;
 }
 
 async function click(element: Element | undefined) {
@@ -124,24 +134,43 @@ async function click(element: Element | undefined) {
   await flush();
 }
 
-async function clickText(label: string) {
-  const button = buttons().find((element) => (element.textContent ?? '').includes(label));
+async function clickText(label: string, scope: ParentNode = container) {
+  const button = buttonsIn(scope).find((element) => (element.textContent ?? '').includes(label));
   if (!button) {
-    throw new Error(`Кнопка «${label}» не найдена. Есть: ${buttons().map((b) => b.textContent).join(' | ')}`);
+    throw new Error(
+      `Кнопка «${label}» не найдена. Есть: ${buttonsIn(scope).map((b) => (b.textContent ?? '').trim()).join(' | ')}`,
+    );
   }
   await click(button);
 }
 
-function dropFile(name: string) {
-  const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
-  if (!input) {
-    throw new Error('Поле выбора файла не найдено');
-  }
-  const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], name, { type: 'image/png' });
-  Object.defineProperty(input, 'files', { value: [file], configurable: true });
-  return act(async () => {
-    input.dispatchEvent(new Event('change', { bubbles: true }));
+/** Открывает пример из поповера «Примеры чертежей» (нижний левый угол). */
+async function openDemo(title = 'Кронштейн КС-04') {
+  await render();
+  await click(byLabel('Примеры чертежей'));
+  await clickText(title);
+  await flush(12);
+}
+
+async function type(input: Element, value: string) {
+  const prototype = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
   });
+}
+
+/** Правит поле InlineEdit: клик по кнопке → новый текст → blur. */
+async function editInline(button: Element | undefined, value: string) {
+  await click(button);
+  const field = container.querySelector('.inline-input');
+  expect(field, 'поле правки').not.toBeNull();
+  await type(field as Element, value);
+  // React 18 слушает blur через делегированный focusout.
+  await act(async () => {
+    field!.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+  });
+  await flush();
 }
 
 beforeEach(() => {
@@ -163,63 +192,149 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('однозадачный конвейер в браузере', () => {
-  it('на главном экране есть drag & drop и три примера', async () => {
+describe('холст с парящими капсулами', () => {
+  it('пустой экран: точечный холст, пять капсул и тихая подсказка по центру', async () => {
     await render();
-    expect(text()).toContain('Перетащите чертёж или 3D-модель сюда');
-    expect(text()).toContain('Кронштейн КС-04');
-    expect(text()).toContain('Редуктор РД-12');
-    expect(text()).toContain('Узел привода УП-08');
-    expect(container.querySelector('.dropzone')).not.toBeNull();
+
+    expect(container.querySelector('.canvas')).not.toBeNull();
+    expect(container.querySelector('.hint-title')?.textContent).toBe('Перетащите чертёж или 3D-модель сюда');
+    expect(buttonsIn(container.querySelector('.hint')!).map((b) => b.textContent).join()).toContain('выберите пример');
+
+    // 2 овальные капсулы + 3 круглые кнопки по углам = 5 парящих элементов.
+    expect(all('.pill')).toHaveLength(2);
+    expect(all('.round')).toHaveLength(3);
+    expect(container.querySelector('.topbar')).toBeNull();
+    expect(container.querySelector('.inspector')).toBeNull();
   });
 
-  it('клик по зоне открывает диалог один раз (без рекурсии)', async () => {
-    const spy = vi.spyOn(HTMLInputElement.prototype, 'click');
+  it('капсулы на месте: назад неактивна, экспорт ждёт документ, тема и движок — в «•••»', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: 'ok' }));
+    vi.stubGlobal('fetch', fetchMock);
     await render();
-    await click(container.querySelector('.dropzone') as Element);
-    expect(spy).toHaveBeenCalledTimes(1);
+
+    expect((byLabel('Назад — пока некуда: файл ещё не открыт') as HTMLButtonElement).disabled).toBe(true);
+    expect((byLabel('Скачать PDF-инструкцию') as HTMLButtonElement).disabled).toBe(true);
+
+    await click(byLabel('Ещё: тема, движок, адреса сервисов'));
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(dialog, 'поповер «Ещё»').not.toBeNull();
+    expect(dialog!.textContent).toContain('Тема');
+    expect(dialog!.textContent).toContain('Движок');
+    // Проверка /health ушла в оба сервиса и статус подписан словами.
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual(
+      expect.arrayContaining(['/health', '/v1/cad/health']),
+    );
+    expect(dialog!.textContent).toContain('на связи');
+
+    await click(buttonsIn(dialog!).find((b) => (b.textContent ?? '').includes('Тёмная')));
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(window.localStorage.getItem('ikguide:theme')).toBe('dark');
   });
 
-  it('демо открывается без сети и показывает предпросмотр листов A4', async () => {
-    await render();
-    await clickText('Кронштейн КС-04');
+  it('пример открывается из поповера и ложится листами A4 прямо на холст', async () => {
+    await openDemo();
 
-    expect(text()).toContain('Скачать PDF-инструкцию');
-    expect(text()).toContain('Предпросмотр');
-    const pages = container.querySelectorAll('.page');
+    const pages = all('.page');
     expect(pages.length).toBeGreaterThan(2);
-    // На титульном листе — название, шифр и материал из документа.
-    expect(container.querySelector('.page')?.textContent).toContain('Кронштейн крепления сервопривода КС-04');
+    expect(pages[0]?.textContent).toContain('Кронштейн крепления сервопривода КС-04');
+    expect(container.querySelector('.sheets')).not.toBeNull();
+    expect((byLabel('Скачать PDF-инструкцию') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('загрузка файла → распознавание → правка нечёткого размера → скачивание PDF', async () => {
+  it('клик по названию на листе A4 открывает правку именно этого поля', async () => {
+    await openDemo();
+
+    const editable = all('.pv-editable').find((node) =>
+      (node.getAttribute('aria-label') ?? '').includes('Изменить: Кронштейн'),
+    );
+    expect(editable, 'название на титульном листе кликабельно').toBeDefined();
+    await click(editable);
+
+    const dialog = container.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('Текст и название');
+    expect(dialog.querySelector('.field-title')?.textContent).toContain('Кронштейн');
+  });
+
+  it('правка шага на листе и кнопка «Отменить» возвращают прежний текст', async () => {
+    await openDemo();
+    await click(byLabel('Рентген ГОСТ и допуски'));
+    await click(byLabel('Закрыть'));
+
+    await click(byLabel('Править текст и название'));
+    const dialog = container.querySelector('[role="dialog"]')!;
+    const original = dialog.querySelector('.step-text')?.textContent ?? '';
+    expect(original.length).toBeGreaterThan(20);
+
+    await editInline(dialog.querySelector('.step-text') as Element, 'Сверлите отверстия строго по маркеру мастера.');
+    const sheetsText = all('.page')
+      .map((page) => page.textContent ?? '')
+      .join(' ');
+    // Строки листа — отдельные <span>, поэтому пробелы на стыке переносов не гарантированы.
+    expect(sheetsText).toMatch(/строго\s*по\s*маркеру/);
+
+    await click(byLabel('Отменить последнее действие'));
+    const afterUndo = all('.page')
+      .map((page) => page.textContent ?? '')
+      .join(' ');
+    expect(afterUndo).not.toContain('маркеру');
+    expect(afterUndo).toContain(original.split(' ')[0] ?? '');
+  }, 30_000);
+
+  it('рентген ГОСТ: пины на листе, быстрый шифр и жёлтая точка у иконки', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(VISION_RESPONSE));
     vi.stubGlobal('fetch', fetchMock);
-    const createObjectURL = vi.fn(() => 'blob:mock');
-    Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true });
-
     await render();
-    await dropFile('kronshteyn.png');
-    await flush(12);
+    await typeFile('kronshteyn.png');
+    await flush(14);
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/v1/recognize');
-    expect(text()).toContain('Скачать PDF-инструкцию');
+    // 64 % — на иконке «Рентген» горит точка: есть неподтверждённый размер.
+    const xrayButton = byLabel('Рентген ГОСТ и допуски');
+    expect(xrayButton.querySelector('.pill-dot'), 'жёлтая точка-индикатор').not.toBeNull();
+    await click(xrayButton);
 
-    // Лист чертежа с пинами: картинка из ответа /v1/recognize и по точке на каждое обозначение.
-    const pins = container.querySelectorAll('.sheet-pin');
+    const dialog = container.querySelector('[role="dialog"]')!;
+    const pins = dialog.querySelectorAll('.sheet-pin');
     expect(pins).toHaveLength(VISION_RESPONSE.candidates.length);
     await click(pins[0] ?? undefined);
     expect(container.querySelectorAll('.notation-active')).toHaveLength(1);
 
-    // 64 % — жёлтая плашка с вариантами «12» / «18».
-    expect(text()).toContain('Проверьте размеры');
-    const choice = buttons().find((element) => element.textContent?.trim() === '18');
-    expect(choice, 'вариант «18» в плашке').toBeDefined();
-    await click(choice);
-    expect(text()).not.toContain('Проверьте размеры');
+    // Быстрая проверка любого шифра из той же шпаргалки.
+    await type(dialog.querySelector('.lookup') as Element, 'Ø20 H7');
+    await flush();
+    const explanation = dialog.querySelector('.lookup-explanation')?.textContent ?? '';
+    expect(explanation).toContain('квалитет');
+    expect(explanation).toContain('20,021');
+  }, 30_000);
 
-    await clickText('Скачать PDF-инструкцию');
-    await flush(12);
+  it('нечёткий размер подтверждается одной парящей пилюлей над листами', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(VISION_RESPONSE));
+    vi.stubGlobal('fetch', fetchMock);
+    await render();
+    await typeFile('kronshteyn.png');
+    await flush(14);
+
+    const ask = container.querySelector('.notice-ask');
+    expect(ask, 'пилюля подтверждения размера').not.toBeNull();
+    expect(ask!.textContent).toContain('Проверьте размер');
+    expect(ask!.textContent).toContain('12');
+
+    const choice = buttonsIn(ask!).find((element) => element.textContent?.trim() === '18');
+    expect(choice, 'вариант «18»').toBeDefined();
+    await click(choice);
+    expect(container.querySelector('.notice-ask')).toBeNull();
+  }, 30_000);
+
+  it('кнопка ↑ собирает настоящий PDF и сообщает о готовом файле', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(VISION_RESPONSE)));
+    const createObjectURL = vi.fn(() => 'blob:mock');
+    Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true });
+
+    await render();
+    await typeFile('kronshteyn.png');
+    await flush(14);
+
+    await click(byLabel('Скачать PDF-инструкцию'));
+    await flush(20);
 
     expect(createObjectURL).toHaveBeenCalled();
     if (clicked.length === 0) {
@@ -229,40 +344,44 @@ describe('однозадачный конвейер в браузере', () => 
     expect(text()).toContain('PDF готов');
   }, 60_000);
 
+  it('3D-модель: ракурс шага меняется в поповере пометки', async () => {
+    await openDemo('Узел привода УП-08');
+    await click(byLabel('Добавить пометку «Осторожно!» или ракурс 3D'));
+
+    const dialog = container.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('Ракурс 3D-схемы');
+    const slider = dialog.querySelector('input[aria-label="Поворот схемы"]') as HTMLInputElement;
+    expect(slider).not.toBeNull();
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(slider, '90');
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+    expect(dialog.textContent).toContain('90°');
+  }, 30_000);
+
   it('без бэкенда показывает подсказку про npm run dev:all и предлагает пример', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
     await render();
-    await dropFile('scan.png');
+    await typeFile('scan.png');
     await flush(12);
 
     expect(text()).toContain('Не получилось');
     expect(text()).toContain('npm run dev:all');
     await clickText('Открыть пример');
-    expect(text()).toContain('Скачать PDF-инструкцию');
-  }, 30_000);
-
-  it('правка текста шага и «Осторожно!» попадают в предпросмотр', async () => {
-    await render();
-    await clickText('Кронштейн КС-04');
-
-    // Первый шаг раскрыт по умолчанию; текст шага — кнопка, пока по ней не кликнули.
-    const before = container.querySelector('.step-text')?.textContent ?? '';
-    expect(before.length).toBeGreaterThan(20);
-    await click(container.querySelector('.step-text') as Element);
-
-    const textarea = container.querySelector('textarea') as HTMLTextAreaElement | null;
-    expect(textarea, 'поле текста шага').not.toBeNull();
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-      setter?.call(textarea, 'Сверлите четыре отверстия Ø6,8 мм строго по разметке.');
-      textarea!.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await act(async () => {
-      textarea!.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
-    });
-    await flush();
-
-    const stepBody = container.querySelector('.step-body')?.textContent ?? '';
-    expect(stepBody).toContain('строго по разметке');
+    expect(all('.page').length).toBeGreaterThan(2);
   }, 30_000);
 });
+
+function typeFile(name: string) {
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+  if (!input) {
+    throw new Error('Поле выбора файла не найдено');
+  }
+  const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], name, { type: 'image/png' });
+  Object.defineProperty(input, 'files', { value: [file], configurable: true });
+  return act(async () => {
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}

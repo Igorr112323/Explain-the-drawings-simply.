@@ -13,14 +13,17 @@
     "windows": [
       {
         "label": "main",
-        "title": "IkGuide — чертёж в PDF-инструкцию",
-        "width": 1360,
-        "height": 860,
+        "title": "IKGuide Studio",
+        "width": 1320,
+        "height": 840,
         "minWidth": 960,
         "minHeight": 640,
         "resizable": true,
         "center": true,
-        "visible": true
+        "visible": true,
+        "backgroundColor": "#FBFBFD",
+        "theme": "light",
+        "dragDropEnabled": true
       }
     ],
     "security": {

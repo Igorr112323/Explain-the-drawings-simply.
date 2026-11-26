@@ -65,8 +65,19 @@ check('productName задан', tauriConf.productName === 'IKGuide Studio', taur
 check('identifier = ru.ikguide.studio', tauriConf.identifier === 'ru.ikguide.studio', tauriConf.identifier);
 
 const window = tauriConf.app?.windows?.[0] ?? {};
-check('окно 1360×860, минимум 960×640', window.width === 1360 && window.height === 860 && window.minWidth === 960 && window.minHeight === 640);
-check('заголовок окна по-русски и про PDF', (window.title ?? '').includes('PDF'), window.title);
+check(
+  'окно 1320×840, минимум 960×640',
+  window.width === 1320 && window.height === 840 && window.minWidth === 960 && window.minHeight === 640,
+  `${window.width}×${window.height}`,
+);
+check('заголовок окна «IKGuide Studio»', window.title === 'IKGuide Studio', window.title);
+check(
+  'светлый фон окна с первого кадра (нет чёрной вспышки)',
+  /^#FBFBFD$/i.test(String(window.backgroundColor ?? '')),
+  window.backgroundColor,
+);
+check('тема окна светлая', window.theme === 'light', window.theme);
+check('drag & drop файлов на окно включён', window.dragDropEnabled !== false);
 check('в конфиге нет упоминаний QR и мобильного приложения', !/QR|qr-код|apk/i.test(JSON.stringify(tauriConf)));
 
 const frontendDist = tauriConf.build?.frontendDist ?? '';
@@ -116,6 +127,9 @@ const libRs = readFileSync(join(tauriDir, 'src-tauri/src/lib.rs'), 'utf8');
 const mainRs = readFileSync(join(tauriDir, 'src-tauri/src/main.rs'), 'utf8');
 check('lib.rs регистрирует плагины dialog и fs', libRs.includes('tauri_plugin_dialog::init()') && libRs.includes('tauri_plugin_fs::init()'));
 check('lib.rs не печатает листы: PDF сохраняется файлом', !libRs.includes('printed') && !libRs.includes('window.print'));
+check('lib.rs умеет тихо поднять движок из папки engine', /engine/.test(libRs) && /ikguide-vision\.exe/.test(libRs));
+check('движок стартует без окна консоли', libRs.includes('CREATE_NO_WINDOW') && libRs.includes('creation_flags'));
+check('движок поднимается в setup, а не по кнопке', libRs.includes('.setup(') && libRs.includes('spawn_local_engines'));
 check('main.rs зовёт ikguide_studio_lib::run()', mainRs.includes('ikguide_studio_lib::run()'));
 check('main.rs скрывает консоль в release', mainRs.includes('windows_subsystem'));
 
@@ -124,6 +138,21 @@ check('capabilities: окно main', (capability.windows ?? []).includes('main')
 const permissions = (capability.permissions ?? []).map((entry) => (typeof entry === 'string' ? entry : entry.identifier));
 check('capabilities: диалог «Сохранить как…»', permissions.includes('dialog:default') && permissions.includes('dialog:allow-save'));
 check('capabilities: запись бинарного PDF', permissions.includes('fs:allow-write-file'));
+check('capabilities: нативный проводник Windows', permissions.includes('dialog:allow-open'));
+check('capabilities: чтение выбранного чертежа', permissions.includes('fs:allow-read-file'));
+
+for (const [service, exe] of [
+  ['vision-api', 'ikguide-vision'],
+  ['cad-api', 'ikguide-cad'],
+]) {
+  const entry = join(ROOT, 'services', service, 'engine_entry.py');
+  check(`services/${service}/engine_entry.py для PyInstaller`, existsSync(entry));
+  if (existsSync(entry)) {
+    const source = readFileSync(entry, 'utf8');
+    check(`  ${service}: слушает только 127.0.0.1`, source.includes('127.0.0.1') && !source.includes('0.0.0.0'));
+    check(`  ${service}: имя ${exe} упоминается в workflow`, readFileSync(join(ROOT, '.github/workflows/release-builds.yml'), 'utf8').includes(exe));
+  }
+}
 
 /* ------------------------------------------------------------------ Workflows */
 
@@ -152,11 +181,19 @@ for (const file of ['ci.yml', 'release-builds.yml']) {
 }
 
 const releaseYaml = readFileSync(join(workflowsDir, 'release-builds.yml'), 'utf8');
+check('release: понятное имя workflow «Build Windows .exe»', /^name:\s*Build Windows \.exe\s*$/m.test(releaseYaml));
 check('release: сборка .exe на windows-latest', releaseYaml.includes('windows-latest'));
 check('release: Node 20', /NODE_VERSION:\s*'20'|node-version:\s*'20'/.test(releaseYaml));
 check('release: rust-toolchain', releaseYaml.includes('dtolnay/rust-toolchain'));
 check('release: нет Android/.apk', !/apk|android|capacitor|gradle/i.test(releaseYaml));
 check('release: артефакт .exe', releaseYaml.includes('ikguide-studio-windows'));
+check('release: переносимый .exe без установки', releaseYaml.includes('IKGuide-Studio-Portable.exe'));
+check('release: установщик IKGuide-Studio-Setup.exe', releaseYaml.includes('IKGuide-Studio-Setup.exe'));
+check('release: движок PyInstaller отдельной джобой', /build-engine-windows/.test(releaseYaml) && releaseYaml.includes('pyinstaller'));
+check(
+  'release: падение PyInstaller не блокирует .exe',
+  /build-engine-windows:[\s\S]{0,400}continue-on-error:\s*true/.test(releaseYaml),
+);
 check('release: архив локального бэкенда', releaseYaml.includes('ikguide-backend'));
 check('release: тэг v* + workflow_dispatch', releaseYaml.includes('tags:') && releaseYaml.includes('workflow_dispatch'));
 

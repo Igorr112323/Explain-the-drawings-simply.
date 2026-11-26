@@ -45,14 +45,48 @@ export function joinUrl(base: string, path: string): string {
   return cleanBase ? `${cleanBase}${cleanPath}` : cleanPath;
 }
 
-/** Адрес сервиса распознавания: относительный в браузере, локальный в упакованном `.exe`. */
+/** Ключи, под которыми меню «•••» запоминает адреса движка на этом компьютере. */
+export const VISION_URL_KEY = 'ikguide:vision-url';
+export const CAD_URL_KEY = 'ikguide:cad-url';
+
+function readStored(key: string): string {
+  try {
+    return globalThis.localStorage?.getItem(key) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** Сохраняет адрес движка; пустая строка возвращает значения по умолчанию. */
+export function storeBaseUrl(key: string, value: string | null): void {
+  try {
+    const clean = sanitizeBaseUrl(value);
+    if (clean) {
+      globalThis.localStorage?.setItem(key, clean);
+    } else {
+      globalThis.localStorage?.removeItem(key);
+    }
+  } catch {
+    // Приватный режим: настройка проживёт до перезапуска.
+  }
+}
+
+/** Что сейчас выбрано в настройках подключения (для полей меню). */
+export function storedBaseUrl(key: string): string {
+  return sanitizeBaseUrl(readStored(key));
+}
+
+/**
+ * Адрес сервиса распознавания: явный аргумент → настройка меню → относительный путь в браузере
+ * или локальный порт в упакованном `.exe`.
+ */
 export function getVisionBaseUrl(runtime: Runtime = detectRuntime(), override?: string): string {
-  return sanitizeBaseUrl(override) || (runtime === 'web' ? '' : NATIVE_VISION_URL);
+  return sanitizeBaseUrl(override) || storedBaseUrl(VISION_URL_KEY) || (runtime === 'web' ? '' : NATIVE_VISION_URL);
 }
 
 /** Адрес сервиса 3D: та же логика, другой порт. */
 export function getCadBaseUrl(runtime: Runtime = detectRuntime(), override?: string): string {
-  return sanitizeBaseUrl(override) || (runtime === 'web' ? '' : NATIVE_CAD_URL);
+  return sanitizeBaseUrl(override) || storedBaseUrl(CAD_URL_KEY) || (runtime === 'web' ? '' : NATIVE_CAD_URL);
 }
 
 /** Готовая подсказка для экрана ошибки: что именно запустить, чтобы всё заработало. */

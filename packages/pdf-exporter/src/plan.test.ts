@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { ikGuideDocumentSchema, type IkGuideDocument } from '@ikguide/schema';
 import { gearboxDocument } from '../../../apps/studio-web/src/data/gearbox';
-import { buildInstructionPlan, instructionFileName, PAGE, type PlanBlock, type PlanText } from './plan';
+import {
+  buildInstructionPlan,
+  instructionFileName,
+  PAGE,
+  type PlanBlock,
+  type PlanTarget,
+  type PlanText,
+} from './plan';
 
 const bracketDocument = ikGuideDocumentSchema.parse({
   schemaVersion: '1.0',
@@ -214,6 +221,42 @@ describe('план PDF-инструкции', () => {
     const plan = buildInstructionPlan(bracketDocument);
     const all = plan.pages.map((page) => flat(page.blocks)).join('\n');
     expect(all).toContain('Схема шага');
+  });
+
+  it('адресует блоки листа: клик на экране знает, какое поле документа править', () => {
+    // Схема появляется только когда есть иллюстрация: у неё тоже должен быть адрес.
+    const plan = buildInstructionPlan(bracketDocument, {
+      steps: { s1: { svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>' } },
+    });
+    const targets = new Map<PlanTarget['type'], PlanTarget>();
+    for (const page of plan.pages) {
+      for (const block of page.blocks) {
+        const target = 'target' in block ? block.target : undefined;
+        if (target && !targets.has(target.type)) {
+          targets.set(target.type, target);
+        }
+      }
+    }
+
+    expect(targets.get('title')).toEqual({ type: 'title' });
+    expect(targets.get('step-title')).toEqual({ type: 'step-title', stepId: 's1' });
+    expect(targets.get('step-text')).toEqual({ type: 'step-text', stepId: 's1' });
+    expect(targets.get('step-anti')).toEqual({ type: 'step-anti', stepId: 's1' });
+    expect(targets.get('step-illustration')).toEqual({ type: 'step-illustration', stepId: 's1' });
+    // В шпаргалке у строки-обозначения есть ссылка на аннотацию, у строки контроля — нет.
+    expect(targets.get('notation')?.type).toBe('notation');
+  });
+
+  it('адреса не меняют сам файл: колонтитулы и контрольные замеры остаются без них', () => {
+    const plan = buildInstructionPlan(bracketDocument);
+    const footer = plan.pages[0]!.blocks.find(
+      (block) => block.kind === 'text' && block.lines.join('').includes('Стр. 1 из'),
+    );
+    expect(footer && 'target' in footer ? footer.target : undefined).toBeUndefined();
+    const targets = plan.pages.flatMap((page) =>
+      page.blocks.map((block) => ('target' in block ? block.target?.type : undefined)).filter(Boolean),
+    );
+    expect(targets.every((type) => !String(type).includes('check'))).toBe(true);
   });
 
   it('делает имя файла пригодным для Windows', () => {

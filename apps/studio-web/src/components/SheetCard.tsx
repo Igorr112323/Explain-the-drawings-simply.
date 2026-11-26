@@ -25,9 +25,8 @@ export function SheetCard({
   }
 
   return (
-    <section className="card">
-      <h3>Лист чертежа</h3>
-      <p className="card-note">
+    <section className="sheet-block">
+      <p className="panel-note">
         Точки — распознанные обозначения. Нажмите на точку, чтобы исправить расшифровку: правка уйдёт
         в шпаргалку PDF.
       </p>
