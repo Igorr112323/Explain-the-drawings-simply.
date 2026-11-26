@@ -43,6 +43,22 @@ describe('схемы для PDF', () => {
     expect(buildIllustrations(turned).steps[step.id]?.svg).toBe(after);
   });
 
+  it('фрагмент настоящего листа важнее нарисованной схемы', () => {
+    const step = bracketDocument.steps[0]!;
+    const illustrations = buildIllustrations(bracketDocument, {
+      steps: { [step.id]: 'data:image/jpeg;base64,AAAA' },
+      cover: 'data:image/jpeg;base64,BBBB',
+    });
+    expect(illustrations.steps[step.id]).toEqual({
+      imageDataUrl: 'data:image/jpeg;base64,AAAA',
+      caption: expect.any(String),
+    });
+    expect(illustrations.cover?.imageDataUrl).toBe('data:image/jpeg;base64,BBBB');
+    // Остальные шаги по-прежнему векторные.
+    const other = bracketDocument.steps[1]!;
+    expect(illustrations.steps[other.id]?.svg).toMatch(/^<svg/);
+  });
+
   it('титул 3D-документа — сборка, 2D — лист чертежа', () => {
     const twoD = coverSvg(bracketDocument);
     expect(twoD).toMatch(/^<svg/);

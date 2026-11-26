@@ -5,6 +5,10 @@ import { DEMO_PROJECTS } from '../data/demos';
 import { buildIllustrations } from './illustrations';
 import { buildPlan, fileNameFor, renderPdf } from './pdfExport';
 
+/** Белый PNG 1×1: минимальная настоящая картинка для проверки ветки PlanImage. */
+const ONE_PIXEL_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
 const latin1 = (bytes: Uint8Array): string => {
   let result = '';
   for (let index = 0; index < bytes.length; index += 0x8000) {
@@ -118,6 +122,21 @@ describe('настоящий PDF-файл', () => {
     expect(content).toMatch(/0\.?\s*0\.478\d*\s+1\.?\s+(RG|rg)/i);
     // И другие цвета линий: чёрные контуры, серые размеры.
     expect(content.match(/\d+\.?\d*\s+\d+\.?\d*\s+\d+\.?\d*\s+(RG|rg)/gi)?.length ?? 0).toBeGreaterThan(2);
+  }, 60_000);
+
+  it('фрагмент листа печатается как картинка внутри страницы шага', async () => {
+    const project = DEMO_PROJECTS.find((item) => item.id === 'demo-bracket')!;
+    const step = project.document.steps[0]!;
+    const job = await renderPdf(project.document, {
+      ...buildIllustrations(project.document),
+      steps: {
+        ...buildIllustrations(project.document).steps,
+        [step.id]: { imageDataUrl: ONE_PIXEL_PNG },
+      },
+    });
+    const raw = latin1(job.bytes);
+    expect(raw).toMatch(/\/Subtype\s*\/Image/);
+    expect(job.plan.pages.length).toBeGreaterThan(2);
   }, 60_000);
 
   it('одинаковый документ даёт одинаковый файл', async () => {

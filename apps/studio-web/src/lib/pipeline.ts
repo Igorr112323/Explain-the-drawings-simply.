@@ -18,6 +18,7 @@ import { OfflineImportError, importMeshOffline } from './cadOffline';
 import { DEMO_BY_ID, type DemoId } from '../data/demos';
 import { backendHint } from './runtimeConfig';
 import { VisionError, recognizeSheets } from './vision';
+import { cropSheet, stepFragment } from './sheetFragment';
 
 export const DRAWING_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.pdf'] as const;
 export const MODEL_EXTENSIONS = ['.step', '.stp', '.stl', '.obj', '.glb', '.gltf'] as const;
@@ -34,6 +35,10 @@ export interface PipelineResult {
   doc: IkGuideDocument;
   /** Растровые листы чертежа: нужны, чтобы кликом по значку править расшифровку. */
   pages: VisionPage[];
+  /** Готовые фрагменты листа для шагов: печатаем настоящий чертёж, а не пиктограмму. */
+  fragments: Record<string, string>;
+  /** Общая схема для титула: весь лист, уменьшенный до печатного размера. */
+  coverFragment: string | null;
   warnings: string[];
   source: PipelineSource;
   files: string[];
@@ -79,6 +84,8 @@ export async function openDemo(id: DemoId): Promise<PipelineResult> {
   return {
     doc: ikGuideDocumentSchema.parse(JSON.parse(JSON.stringify(project.document))) as IkGuideDocument,
     pages: [],
+    fragments: {},
+    coverFragment: null,
     warnings: [],
     source: 'demo',
     files: [],
@@ -108,9 +115,12 @@ async function fromDrawings(files: File[], report: ProgressReporter): Promise<Pi
       createdAt: new Date().toISOString(),
       keepLowConfidence: true,
     });
+    const pages = response.pages ?? [];
     return {
       doc: result.document,
-      pages: response.pages ?? [],
+      pages,
+      fragments: await fragmentsFor(result.document, pages),
+      coverFragment: await coverFragmentFor(pages),
       warnings: result.warnings,
       source: 'vision',
       files: files.map((file) => file.name),
@@ -169,6 +179,8 @@ async function fromModel(file: File, report: ProgressReporter): Promise<Pipeline
     return {
       doc: result.document,
       pages: [],
+      fragments: {},
+      coverFragment: null,
       warnings: result.warnings,
       source: payload.source,
       files: [file.name],
@@ -182,6 +194,30 @@ async function fromModel(file: File, report: ProgressReporter): Promise<Pipeline
     }
     throw new PipelineError('Не удалось собрать инструкцию из модели.', backendHint());
   }
+}
+
+/** По одной обрезке листа на шаг: именно эти фрагменты попадут на страницы PDF. */
+async function fragmentsFor(doc: IkGuideDocument, pages: readonly VisionPage[]): Promise<Record<string, string>> {
+  const dataUrl = pages.find((page) => page.imageDataUrl)?.imageDataUrl;
+  if (!dataUrl) {
+    return {};
+  }
+  const result: Record<string, string> = {};
+  for (const step of doc.steps) {
+    const fragment = await stepFragment(dataUrl, doc.xrayAnnotations, step.drawingRefs ?? []);
+    if (fragment) {
+      result[step.id] = fragment;
+    }
+  }
+  return result;
+}
+
+async function coverFragmentFor(pages: readonly VisionPage[]): Promise<string | null> {
+  const dataUrl = pages.find((page) => page.imageDataUrl)?.imageDataUrl;
+  if (!dataUrl) {
+    return null;
+  }
+  return cropSheet(dataUrl, { x: 0.03, y: 0.02, width: 0.94, height: 0.94 }, 900);
 }
 
 /** Главная точка входа экрана загрузки. */

@@ -45,6 +45,8 @@ export interface PipelineState {
   percent: number;
   doc: IkGuideDocument | null;
   pages: VisionPage[];
+  fragments: Record<string, string>;
+  coverFragment: string | null;
   source: PipelineSource | null;
   warnings: string[];
   files: string[];
@@ -59,6 +61,8 @@ const INITIAL: PipelineState = {
   percent: 0,
   doc: null,
   pages: [],
+  fragments: {},
+  coverFragment: null,
   source: null,
   warnings: [],
   files: [],
@@ -97,10 +101,12 @@ export function usePipeline(): PipelineApi {
   const [state, setState] = useState<PipelineState>(INITIAL);
   const mounted = useRef(true);
   const docRef = useRef<IkGuideDocument | null>(null);
+  const stateRef = useRef(state);
 
   useEffect(() => {
     docRef.current = state.doc;
-  }, [state.doc]);
+    stateRef.current = state;
+  }, [state]);
 
   useEffect(() => {
     mounted.current = true;
@@ -128,6 +134,8 @@ export function usePipeline(): PipelineApi {
       percent: 1,
       doc: result.doc,
       pages: result.pages,
+      fragments: result.fragments,
+      coverFragment: result.coverFragment,
       source: result.source,
       warnings: result.warnings,
       files: result.files,
@@ -216,7 +224,11 @@ export function usePipeline(): PipelineApi {
         }
         setState((prev) => ({ ...prev, pdfBusy: true, error: null }));
         try {
-          const job = await renderPdf(current, buildIllustrations(current));
+          const latest = stateRef.current;
+          const job = await renderPdf(
+            current,
+            buildIllustrations(current, { steps: latest.fragments, cover: latest.coverFragment }),
+          );
           await downloadPdf(job);
           if (mounted.current) {
             setState((prev) => ({ ...prev, pdfBusy: false, pdfJob: job }));
@@ -239,8 +251,11 @@ export function usePipeline(): PipelineApi {
   );
 
   const illustrations = useMemo(
-    () => (state.doc ? buildIllustrations(state.doc) : { cover: undefined, steps: {} }),
-    [state.doc],
+    () =>
+      state.doc
+        ? buildIllustrations(state.doc, { steps: state.fragments, cover: state.coverFragment })
+        : { cover: undefined, steps: {} },
+    [state.doc, state.fragments, state.coverFragment],
   );
   const ambiguous = useMemo(() => (state.doc ? ambiguousSizes(state.doc) : []), [state.doc]);
   const softNotes = useMemo(() => (state.doc ? lowConfidenceNotes(state.doc) : []), [state.doc]);

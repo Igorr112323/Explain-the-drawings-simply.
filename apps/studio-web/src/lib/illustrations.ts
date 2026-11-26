@@ -17,6 +17,12 @@ export interface Illustrations {
   steps: Record<string, IllustrationInput>;
 }
 
+/** Фрагменты настоящего листа (после распознавания): приоритетнее нарисованных схем. */
+export interface FragmentInput {
+  steps?: Readonly<Record<string, string>>;
+  cover?: string | null;
+}
+
 const DEFAULT_AZIMUTH = 35;
 const DEFAULT_ELEVATION = 26;
 
@@ -95,11 +101,23 @@ export function coverSvg(doc: IkGuideDocument): string | undefined {
   return undefined;
 }
 
-export function buildIllustrations(doc: IkGuideDocument): Illustrations {
+export function buildIllustrations(doc: IkGuideDocument, fragments: FragmentInput = {}): Illustrations {
   const steps: Record<string, IllustrationInput> = {};
   for (const step of doc.steps) {
+    const fragment = fragments.steps?.[step.id];
+    if (fragment) {
+      steps[step.id] = { imageDataUrl: fragment, caption: captionOf(step) };
+      continue;
+    }
     const svg = doc.assembly3d ? step3dSvg(doc, step) : (step.svgDiagram ?? artSvg(step));
     steps[step.id] = { svg: svg ?? undefined, caption: captionOf(step) };
+  }
+
+  if (fragments.cover) {
+    return {
+      cover: { imageDataUrl: fragments.cover, caption: 'Общий вид: лист чертежа' },
+      steps,
+    };
   }
   const cover = coverSvg(doc);
   return {
