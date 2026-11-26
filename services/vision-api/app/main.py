@@ -99,6 +99,30 @@ app.add_middleware(
 )
 
 
+def _rss_bytes() -> int:
+    """Реальный RSS процесса: /proc есть на Linux, на Windows вернём 0 (сторож просто молчит)."""
+    try:
+        with open("/proc/self/status", encoding="ascii", errors="ignore") as handle:
+            for line in handle:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        return 0
+    return 0
+
+
+def _guard_memory() -> str | None:
+    """Аварийный клапан: если процесс распух, кэш страниц очищается целиком.
+
+    Кэш нужен только «Рентгену»; потерять его дешевле, чем быть убитым OOM посреди запроса —
+    именно так сервис падал на прогоне 1 000 файлов.
+    """
+    if _rss_bytes() < config.MEMORY_SOFT_LIMIT_BYTES:
+        return None
+    page_store.clear()
+    return "Память под распознавание освобождена: повторно выделять область в «Рентгене» придётся после новой загрузки листа."
+
+
 def _engine_info() -> EngineInfo:
     engine = engine_state.engine()
     return EngineInfo(
@@ -292,6 +316,10 @@ async def recognize(files: list[UploadFile] = File(default_factory=list)) -> Rec
         )
         for candidate in candidates
     ]
+
+    memory_notice = _guard_memory()
+    if memory_notice:
+        notices.append(memory_notice)
 
     first = pages[0]
     return RecognizeResponse(

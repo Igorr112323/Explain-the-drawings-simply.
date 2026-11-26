@@ -222,6 +222,9 @@ const mainRs = readText(join(tauriDir, 'src-tauri/src/main.rs'));
 check('lib.rs регистрирует плагины dialog и fs', libRs.includes('tauri_plugin_dialog::init()') && libRs.includes('tauri_plugin_fs::init()'));
 check('lib.rs не печатает листы: PDF сохраняется файлом', !libRs.includes('printed') && !libRs.includes('window.print'));
 check('lib.rs умеет тихо поднять движок из папки engine', /engine/.test(libRs) && /ikguide-vision\.exe/.test(libRs));
+check('lib.rs передаёт движку свой PID (иначе остаётся зомби после падения)', libRs.includes('--parent-pid') && libRs.includes('std::process::id()'));
+check('lib.rs проверяет, что на порту именно наш движок', libRs.includes('ikguide-vision-api'));
+check('lib.rs дочитывает /health до конца, а не одним read', /loop \{[\s\S]{0,400}response\.extend_from_slice/.test(libRs));
 check('движок стартует без окна консоли', libRs.includes('CREATE_NO_WINDOW') && libRs.includes('creation_flags'));
 check('движок поднимается в setup, а не по кнопке', libRs.includes('.setup(') && libRs.includes('start_engine'));
 
@@ -352,6 +355,13 @@ if (existsSync(shPath)) {
   check('  .sh знает про install/run', sh.includes('install') && sh.includes('run'));
   check('  .sh не открывает порты наружу', !sh.includes('--host 0.0.0.0'));
 }
+
+/* ------------------------------------------------- Сторож движка (Python) */
+
+const engineEntry = readText(join(ROOT, 'services/vision-api/engine_entry.py'));
+check('engine_entry.py понимает --parent-pid', engineEntry.includes('--parent-pid'));
+check('engine_entry.py не оставляет зомби: сторож родителя', engineEntry.includes('watch_parent') && engineEntry.includes('parent_alive'));
+check('engine_entry.py слушает только 127.0.0.1', engineEntry.includes('host="127.0.0.1"'));
 
 /* --------------------------------------------------------------- Итог */
 

@@ -61,7 +61,7 @@ class RapidOcrEngine:
 
     name = "rapidocr"
 
-    def __init__(self, max_side: int = 2200, timeout: float = OCR_TIMEOUT_SECONDS) -> None:
+    def __init__(self, max_side: int = config.OCR_MAX_SIDE, timeout: float = OCR_TIMEOUT_SECONDS) -> None:
         from rapidocr_onnxruntime import RapidOCR  # imported lazily: keeps boot time low
 
         os.environ.setdefault("OMP_NUM_THREADS", "2")
@@ -99,9 +99,15 @@ class RapidOcrEngine:
     def name(self) -> str:  # type: ignore[override]
         return "rapidocr-cyrillic" if self._cyrillic_model else "rapidocr"
 
-    def _prepare(self, image: np.ndarray) -> np.ndarray:
+    def _prepare(self, image: np.ndarray) -> np.ndarray | None:
         gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         height, width = gray.shape[:2]
+        # Вырожденные картинки (полоска 1200×1, иконка 8×8) валят нативный детектор RapidOCR
+        # вместе со всем процессом: SIGSEGV не перехватить, поэтому просто не зовём движок.
+        if min(height, width) < 8 or max(height, width) < 24:
+            return None
+        if max(height, width) / max(1, min(height, width)) > 60:
+            return None
         longest = max(height, width)
         if longest > self._max_side:
             factor = self._max_side / longest
@@ -138,6 +144,8 @@ class RapidOcrEngine:
         if self._degraded:
             return []
         prepared = self._prepare(image)
+        if prepared is None:
+            return []
         future = self._executor.submit(self._run, prepared)
         try:
             return future.result(timeout=self._timeout)

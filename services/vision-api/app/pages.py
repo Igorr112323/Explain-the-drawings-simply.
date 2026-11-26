@@ -193,22 +193,53 @@ def pages_from_upload(data: bytes, filename: str, start_index: int) -> list[Prep
     return kept
 
 
-class PageStore:
-    """In-memory page cache for ROI re-recognition. Thread-safe, TTL + size bounded."""
+def page_bytes(page: PreparedPage) -> int:
+    """Сколько памяти занимает страница: изображение + координаты распознанного текста."""
+    image_bytes = int(getattr(page.image, "nbytes", 0)) if page.image is not None else 0
+    vector_bytes = sum(64 + len(line.text) for line in page.vector_lines)
+    return image_bytes + vector_bytes
 
-    def __init__(self, ttl: float = config.PAGE_TTL_SECONDS, max_items: int = config.MAX_STORED_PAGES) -> None:
+
+class PageStore:
+    """In-memory page cache for ROI re-recognition. Thread-safe, TTL + memory bounded.
+
+    Кэш нужен только для того, чтобы «Рентген» мог перечитать выделенный прямоугольник без
+    повторной загрузки листа. Держать десятки полноразмерных сканов нельзя: 1 000-кейсовый
+    прогон показал, что прежний лимит «32 страницы / 30 минут» упирается в OOM и убивает сервис.
+    Поэтому бюджет считается в байтах, а не в штуках.
+    """
+
+    def __init__(
+        self,
+        ttl: float = config.PAGE_TTL_SECONDS,
+        max_items: int = config.MAX_STORED_PAGES,
+        max_bytes: int = config.MAX_STORED_BYTES,
+    ) -> None:
         self._items: dict[str, tuple[float, PreparedPage]] = {}
         self._lock = threading.Lock()
         self._ttl = ttl
         self._max_items = max_items
+        self._max_bytes = max_bytes
 
     def put(self, page: PreparedPage) -> None:
         with self._lock:
             self._evict()
             self._items[page.page_id] = (time.monotonic(), page)
-            while len(self._items) > self._max_items:
-                oldest = min(self._items.items(), key=lambda item: item[1][0])[0]
-                self._items.pop(oldest, None)
+            self._trim()
+
+    def _trim(self) -> None:
+        while self._items and (
+            len(self._items) > self._max_items or self.total_bytes() > self._max_bytes
+        ):
+            oldest = min(self._items.items(), key=lambda item: item[1][0])[0]
+            self._items.pop(oldest, None)
+
+    def total_bytes(self) -> int:
+        return sum(page_bytes(page) for _, page in self._items.values())
+
+    def stats(self) -> dict[str, int]:
+        with self._lock:
+            return {"items": len(self._items), "bytes": self.total_bytes(), "maxBytes": self._max_bytes}
 
     def get(self, page_id: str) -> PreparedPage | None:
         with self._lock:

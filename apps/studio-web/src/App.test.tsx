@@ -208,7 +208,7 @@ describe('холст с парящими капсулами', () => {
   });
 
   it('капсулы на месте: назад неактивна, экспорт ждёт документ, тема и движок — в «•••»', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: 'ok' }));
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: 'ok', service: 'ikguide-vision-api' }));
     vi.stubGlobal('fetch', fetchMock);
     await render();
 
@@ -433,6 +433,61 @@ describe('холст с парящими капсулами', () => {
     await editInline(field, 'Не сверлить насквозь.');
     expect(text()).toContain('Не сверлить насквозь.');
   }, 30_000);
+
+  it('масштаб упирается в 40 % и 250 %, а не уходит в бесконечность', async () => {
+    await openDemo();
+    for (let step = 0; step < 8; step += 1) {
+      await click(byLabel('Уменьшить масштаб'));
+    }
+    expect(container.querySelector('.zoom-pill')!.textContent).toContain('40%');
+    for (let step = 0; step < 16; step += 1) {
+      await click(byLabel('Увеличить масштаб'));
+    }
+    expect(container.querySelector('.zoom-pill')!.textContent).toContain('250%');
+    // Листы не должны терять подписи на крайних значениях.
+    expect(all('.page-caption')[0]?.textContent).toContain('Стр. 1 из');
+  }, 30_000);
+
+  it('тема переключается из «•••» и запоминается в localStorage', async () => {
+    await openDemo();
+    await click(byLabel('Ещё: тема, движок, адреса сервисов'));
+    const group = container.querySelector('[aria-label="Тема оформления"]');
+    expect(group, 'переключатель темы').not.toBeNull();
+    const dark = Array.from(group!.querySelectorAll('button')).find((button) => button.textContent?.includes('Тёмная'));
+    expect(dark, 'кнопка «Тёмная»').toBeDefined();
+    await click(dark);
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(window.localStorage.getItem('ikguide:theme')).toBe('dark');
+    expect(all('.page').length).toBeGreaterThan(0);
+
+    const light = Array.from(group!.querySelectorAll('button')).find((button) => button.textContent?.includes('Светлая'));
+    await click(light);
+    expect(document.documentElement.dataset.theme).toBe('light');
+  }, 30_000);
+
+  it('после скачивания PDF ссылка на blob освобождается', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(VISION_RESPONSE)));
+    const revoked: string[] = [];
+    Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:mock'), configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      value: vi.fn((url: string) => revoked.push(url)),
+      configurable: true,
+    });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    await render();
+    await typeFile('kronshteyn.png');
+    await flush(14);
+    await click(byLabel('Скачать PDF-инструкцию'));
+    await flush(20);
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    vi.useRealTimers();
+
+    expect(clicked.length).toBeGreaterThan(0);
+    expect(revoked, 'revokeObjectURL не вызывается — вкладка будет течь').toContain('blob:mock');
+  }, 60_000);
 
   it('без бэкенда показывает подсказку про npm run dev:all и предлагает пример', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));

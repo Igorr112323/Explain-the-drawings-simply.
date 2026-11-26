@@ -14,7 +14,13 @@ export interface EngineReport {
   visionUrl: string;
 }
 
-/** Один пинг `/health` с таймаутом: `ok` — ответил 2xx, `down` — не ответил вовсе. */
+/**
+ * Один пинг `/health` с таймаутом: `ok` — ответил 2xx и представился нашим сервисом,
+ * `down` — не ответил вовсе.
+ *
+ * Мало кода 200: на 127.0.0.1:8000 у инженера может висеть чужой сервис (Jupyter, отладочный
+ * сервер), и тогда меню бодро сообщало «на связи», а распознавание не работало.
+ */
 export async function pingHealth(base: string, timeoutMs = 2500, path = '/health'): Promise<EngineState> {
   const controller = typeof AbortController === 'undefined' ? null : new AbortController();
   const timer = controller ? globalThis.setTimeout(() => controller.abort(), timeoutMs) : null;
@@ -23,7 +29,18 @@ export async function pingHealth(base: string, timeoutMs = 2500, path = '/health
       signal: controller?.signal,
       headers: { accept: 'application/json' },
     });
-    return response.ok ? 'ok' : 'down';
+    if (!response.ok) {
+      return 'down';
+    }
+    if (path !== '/health') {
+      return 'ok';
+    }
+    try {
+      const payload = (await response.json()) as { service?: string };
+      return payload.service === 'ikguide-vision-api' ? 'ok' : 'down';
+    } catch {
+      return 'down';
+    }
   } catch {
     return 'down';
   } finally {

@@ -2,6 +2,12 @@ import { findFinePitch, findMetricThread } from '../tables/metricThreads';
 import { formatMm, parseDecimal } from '../format';
 import type { RecommendedTool, ThreadTranslation } from '../types';
 
+/** ГОСТ 24705: метрическая резьба начинается с М1 и заканчивается М600. */
+const MIN_THREAD_DIAMETER = 1;
+const MAX_THREAD_DIAMETER = 600;
+/** Шаг крупнее 6,5 мм в метрической резьбе не встречается (М68×6 — уже специальная). */
+const MAX_THREAD_PITCH = 6.5;
+
 const THREAD_PATTERN =
   /^(?:(\d+)\s*(?:отв\.?|отверсти[йяе]|шт\.?)\s*)?[МM]\s*(\d+(?:[.,]\d+)?)(?:\s*[×x*]\s*(\d+(?:[.,]\d+)?))?(?:\s*-\s*(\d{1,2}\s*[A-Za-zА-Яа-я]{1,2}))?(?:\s*(?:глуб\.?|глубина|глубиной)\s*(\d+(?:[.,]\d+)?))?\s*(?:мм)?$/i;
 
@@ -26,6 +32,18 @@ export function parseThread(normalized: string): ThreadTranslation | null {
   const explicitPitch = pitchRaw ? parseDecimal(pitchRaw) : null;
   const pitchMm = explicitPitch ?? row?.coarsePitchMm ?? null;
   const toleranceClass = toleranceRaw ? toleranceRaw.replace(/\s/g, '') : null;
+
+  // Защита от опечаток распознавания: «М0×1,25» давала сверло Ø−1,3, а «М920×2» — резьбу,
+  // которой не существует. Такое обозначение честнее показать как нераспознанное.
+  if (!Number.isFinite(diameterMm) || diameterMm < MIN_THREAD_DIAMETER || diameterMm > MAX_THREAD_DIAMETER) {
+    return null;
+  }
+  if (pitchMm !== null && (!Number.isFinite(pitchMm) || pitchMm <= 0 || pitchMm > MAX_THREAD_PITCH)) {
+    return null;
+  }
+  if (pitchMm !== null && pitchMm >= diameterMm) {
+    return null;
+  }
 
   const warnings: string[] = [];
   let threadKind: ThreadTranslation['threadKind'] = 'unspecified';

@@ -33,6 +33,29 @@ def _odd(value: float) -> int:
     return size if size % 2 == 1 else size + 1
 
 
+MIN_SHEET_SIDE = 48
+MAX_SHEET_ASPECT = 40.0
+
+
+def reject_degenerate(image: np.ndarray) -> None:
+    """Вырожденный «лист» (полоска, иконка, битая развёртка) отклоняем до OCR.
+
+    Кроме понятной ошибки это защита от падения: нативный OCR-детектор на такой картинке
+    получает SIGSEGV и уносит с собой весь сервис.
+    """
+    if image is None or image.size == 0:
+        raise UnsupportedImageError("Пустое изображение: выберите файл ещё раз.")
+    height, width = image.shape[:2]
+    if min(height, width) < MIN_SHEET_SIDE:
+        raise UnsupportedImageError(
+            f"Изображение слишком маленькое ({width}×{height} px): загрузите лист чертежа целиком."
+        )
+    if max(height, width) / max(1, min(height, width)) > MAX_SHEET_ASPECT:
+        raise UnsupportedImageError(
+            f"Изображение вытянуто как полоска ({width}×{height} px): похоже, лист обрезан."
+        )
+
+
 def decode_image_bytes(data: bytes) -> np.ndarray:
     buffer = np.frombuffer(data, dtype=np.uint8)
     image = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
@@ -241,6 +264,7 @@ def upscale_for_ocr(image: np.ndarray) -> tuple[np.ndarray, float]:
 
 def process_image(image: np.ndarray) -> ProcessedImage:
     """Full preprocessing for photos and scans. Layout/OCR always work on the cleaned version."""
+    reject_degenerate(image)
     limited = limit_size(image)
     quality_before = assess(limited)
     rectified, corrected, corners = rectify(limited)

@@ -94,4 +94,31 @@ describe('metric thread parser (GOST 24705 / GOST 19257)', () => {
     expect(parseThread('Ø20 H7')).toBeNull();
     expect(parseThread('Ra 1.6')).toBeNull();
   });
+
+  it('rejects threads that cannot exist and never emits a negative tap drill', () => {
+    // Найдено фаззингом 2 600 строк ГОСТ: «М0×1,25-6H» давало сверло Ø−1,3 мм,
+    // «М20×29-6H» — шаг 29 мм, «М920×2-6H» — резьбу на 920 мм.
+    for (const input of ['М0', 'М0×1,25-6H', 'М1×1,25-6H', 'М20×29-6H', 'М920×2-6H', 'М601']) {
+      const parsed = parseThread(input);
+      expect(parsed, input).toBeNull();
+      const translated = translateEngineeringNotation(input);
+      expect(translated.kind, input).not.toBe('thread');
+    }
+  });
+
+  it('keeps the tap drill strictly inside the thread diameter', () => {
+    for (const input of ['М1', 'М3×0,35-6H', 'М6-7H', 'М12-6H', 'М30×2-6H', 'М64×4-6H']) {
+      const parsed = parseThread(input);
+      expect(parsed, input).not.toBeNull();
+      if (!parsed) continue;
+      expect(parsed.tapDrillMm, input).toBeGreaterThan(0);
+      expect(parsed.tapDrillMm, input).toBeLessThan(parsed.diameterMm);
+      for (const tool of parsed.tools) {
+        const match = /(\d+(?:[.,]\d+)?)\s*мм/.exec(tool.name);
+        if (match) {
+          expect(Number(match[1]?.replace(',', '.')), `${input} → ${tool.name}`).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
 });

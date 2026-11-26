@@ -9,7 +9,11 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-const ok = { ok: true, status: 200 } as Response;
+const ok = {
+  ok: true,
+  status: 200,
+  json: async () => ({ status: 'ok', service: 'ikguide-vision-api' }),
+} as unknown as Response;
 
 describe('здоровье локального движка', () => {
   it('пингует /health и считает живым только 2xx', async () => {
@@ -20,6 +24,24 @@ describe('здоровье локального движка', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8000/health');
 
     fetchMock.mockResolvedValue({ ok: false, status: 503 } as Response);
+    await expect(pingHealth('http://127.0.0.1:8000')).resolves.toBe('down');
+  });
+
+  it('чужой сервис на 8000 не считается движком (иначе меню врёт «на связи»)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: 'ok', app: 'jupyter' }),
+      } as unknown as Response),
+    );
+    await expect(pingHealth('http://127.0.0.1:8000')).resolves.toBe('down');
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => { throw new SyntaxError('html'); } } as unknown as Response),
+    );
     await expect(pingHealth('http://127.0.0.1:8000')).resolves.toBe('down');
   });
 

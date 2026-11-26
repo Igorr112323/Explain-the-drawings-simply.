@@ -88,14 +88,26 @@ fn health_ok(port: u16) -> bool {
     {
         return false;
     }
-    let mut buffer = [0u8; 128];
-    match stream.read(&mut buffer) {
-        Ok(read) if read > 0 => {
-            let head = String::from_utf8_lossy(&buffer[..read]);
-            head.starts_with("HTTP/1.") && head.contains(" 200")
+    // Дочитываем ответ до конца (мы сами попросили `Connection: close`): заголовки и тело
+    // приходят разными пакетами, и по одному `read` имя сервиса можно не увидеть.
+    let mut response = Vec::new();
+    let mut buffer = [0u8; 512];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                response.extend_from_slice(&buffer[..read]);
+                if response.len() > 8192 {
+                    break;
+                }
+            }
+            Err(_) => break,
         }
-        _ => false,
     }
+    let head = String::from_utf8_lossy(&response);
+    // Мало получить 200: на 8000 может висеть чужой сервис (у инженера их обычно несколько).
+    // Движок обязан представиться в /health.
+    head.starts_with("HTTP/1.") && head.contains(" 200") && head.contains("ikguide-vision-api")
 }
 
 /// Порт живого движка, если он уже отвечает (8000, затем 8001).
@@ -163,6 +175,8 @@ fn spawn_quietly(path: &Path) -> bool {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     match std::process::Command::new(path)
         .creation_flags(CREATE_NO_WINDOW)
+        .arg("--parent-pid")
+        .arg(std::process::id().to_string())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -176,6 +190,8 @@ fn spawn_quietly(path: &Path) -> bool {
 #[cfg(not(windows))]
 fn spawn_quietly(path: &Path) -> bool {
     match std::process::Command::new(path)
+        .arg("--parent-pid")
+        .arg(std::process::id().to_string())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
