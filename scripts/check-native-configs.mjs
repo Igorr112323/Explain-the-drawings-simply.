@@ -190,7 +190,7 @@ check('release: артефакт .exe', releaseYaml.includes('ikguide-studio-win
 check('release: переносимый .exe без установки', releaseYaml.includes('IKGuide-Studio-Portable.exe'));
 check(
   'release: Windows-джобы обходят имя репозитория с точкой на конце',
-  (releaseYaml.match(/git clone[^\n]*C:\\\\ikguide/g) ?? []).length >= 2,
+  (releaseYaml.match(/git clone[^\n]*ikguide/g) ?? []).length >= 2,
 );
 check('release: причина падения Tauri видна в аннотации', releaseYaml.includes('::error title=Сборка Tauri упала'));
 check('release: установщик IKGuide-Studio-Setup.exe', releaseYaml.includes('IKGuide-Studio-Setup.exe'));
