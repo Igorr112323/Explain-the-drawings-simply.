@@ -305,8 +305,14 @@ def root(request: Request):
     """JSON для API-клиентов, собранная студия — для браузера/Safari на iPhone."""
 
     dist = resolve_studio_dist()
-    accepts_html = "text/html" in request.headers.get("accept", "").lower()
-    if dist is not None and accepts_html:
+    accept = request.headers.get("accept", "").lower()
+    # Сканер в телефоне и встроенный WebView часто присылают `*/*` вместо `text/html`: ссылка из QR
+    # должна открывать приложение, а не JSON. `*/*` без ссылки и явный `application/json` — это
+    # API-клиенты, им по-прежнему отвечает JSON.
+    explicit_json = "application/json" in accept and "text/html" not in accept
+    has_guide_link = "guideId" in request.query_params or "guide" in request.query_params
+    wants_html = "text/html" in accept or (has_guide_link and not explicit_json)
+    if dist is not None and wants_html and not explicit_json:
         return FileResponse(dist / "index.html")
 
     return {

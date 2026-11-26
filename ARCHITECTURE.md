@@ -519,7 +519,7 @@ readPublishedLink(location|text)    → {guideId, api} | null
   `ikguide://guide/<id>` (этап 1).
 
 ### 7.7 Тесты этапа 5
-- `services/vision-api/tests/test_guides.py` (30): публикация/дедупликация/вытеснение по `seq`, кривые
+- `services/vision-api/tests/test_guides.py` (31): публикация/дедупликация/вытеснение по `seq`, кривые
   коды и обход путей, пустое тело и битый JSON, 413, `absoluteUrl` для телефона, `/v1/network-info`,
   классификация адресов (`link-local` ≠ цех), поиск и монтирование студии, разбор `Accept` на `/`.
 - `apps/studio-web/src/lib/publishedGuides.test.ts` (18): сборка и разбор ссылок всех поколений, POST и
@@ -665,7 +665,7 @@ readPublishedLink(location|text)    → {guideId, api} | null
 - [x] Сканер понимает опубликованную ссылку; неизвестный код объясняется, а не молчит
 - [x] `publishedCode` в офлайн-библиотеке: та же ссылка открывает копию без сервера
 - [x] `services/vision-api/data/` в `.gitignore`, `IKGUIDE_GUIDES_DIR` для другого каталога
-- [x] Тесты: `test_guides.py` (30), `publishedGuides.test.ts` (18), `stage5.test.tsx` (6), `offlineStore` (+1) —
+- [x] Тесты: `test_guides.py` (31), `publishedGuides.test.ts` (18), `stage5.test.tsx` (6), `offlineStore` (+1) —
       всего 267 тестов / 25 файлов и 129 pytest сервиса распознавания
 - [x] `npm test`, `npm run typecheck`, `npm run build`, `npm run test:vision`, `npm run test:cad`,
       `npm run check:native` — зелёные

@@ -337,6 +337,15 @@ def test_root_serves_the_studio_to_browsers_and_json_to_api_clients(guide_api, t
     assert api.headers["content-type"].startswith("application/json")
     assert "/v1/guides" in api.json()["endpoints"]
 
+    # Сканер в телефоне присылает `*/*`: по ссылке из QR должна открыться студия, а не JSON.
+    scanned = client.get("/?guideId=pay88sbx&api=http://192.168.1.50:8000", headers={"accept": "*/*"})
+    assert "text/html" in scanned.headers["content-type"]
+    assert "студия" in scanned.text
+
+    # Явный запрос JSON остаётся JSON даже по ссылке.
+    explicit = client.get("/?guideId=pay88sbx", headers={"accept": "application/json"})
+    assert explicit.headers["content-type"].startswith("application/json")
+
 
 def test_summary_file_is_valid_json_on_disk(tmp_path):
     store = GuideStore(tmp_path / "guides")
