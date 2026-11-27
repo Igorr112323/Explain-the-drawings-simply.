@@ -293,11 +293,17 @@ def _is_combined_callout(first: str, second: str) -> bool:
 
 
 def box_to_percent(box: Box, width: int, height: int) -> BBoxPercent:
+    # PDF glyphs can extend outside the media box (negative ascenders, bleeds).
+    # Intersect with the visible page before serializing the constrained bbox.
+    x0 = max(0, min(width, box.x))
+    y0 = max(0, min(height, box.y))
+    x1 = max(x0, min(width, box.x + box.w))
+    y1 = max(y0, min(height, box.y + box.h))
     return BBoxPercent(
-        x=round(box.x / width * 100, 3),
-        y=round(box.y / height * 100, 3),
-        w=round(box.w / width * 100, 3),
-        h=round(box.h / height * 100, 3),
+        x=round(x0 / width * 100, 3),
+        y=round(y0 / height * 100, 3),
+        w=round((x1 - x0) / width * 100, 3),
+        h=round((y1 - y0) / height * 100, 3),
     )
 
 

@@ -161,3 +161,12 @@ def test_rotated_pdf_vector_boxes_are_in_rendered_page_coordinates():
         assert line.box.x2 <= page.rect.width * 2
         assert line.box.y2 <= page.rect.height * 2
     doc.close()
+
+
+def test_percent_box_clips_outside_page():
+    from app.extractor import box_to_percent
+    from app.layout import Box
+    clipped = box_to_percent(Box(-5, -10, 25, 30), 100, 100)
+    assert (clipped.x, clipped.y, clipped.w, clipped.h) == (0, 0, 20, 20)
+    beyond = box_to_percent(Box(95, 99, 15, 20), 100, 100)
+    assert (beyond.x, beyond.y, beyond.w, beyond.h) == (95, 99, 5, 1)
