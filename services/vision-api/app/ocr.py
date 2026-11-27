@@ -188,7 +188,18 @@ class TesseractOcrEngine:
         pytesseract.pytesseract.tesseract_cmd = binary
         bundled = Path(binary).parent / "tessdata"
         if bundled.is_dir():
-            os.environ["TESSDATA_PREFIX"] = str(bundled)
+            tessdata = str(bundled)
+            if os.name == "nt":
+                # Some Windows Tesseract builds open paths through ANSI APIs. 8.3
+                # aliases avoid losing Cyrillic characters in the parent directory.
+                import ctypes
+                get_short = ctypes.windll.kernel32.GetShortPathNameW
+                get_short.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+                get_short.restype = ctypes.c_uint32
+                short = ctypes.create_unicode_buffer(32768)
+                if 0 < get_short(tessdata, short, len(short)) < len(short):
+                    tessdata = short.value
+            os.environ["TESSDATA_PREFIX"] = tessdata
         languages = set(pytesseract.get_languages(config=""))
         if not {"rus", "eng"}.issubset(languages):
             raise RuntimeError(f"Tesseract requires rus and eng traineddata: {sorted(languages)}")

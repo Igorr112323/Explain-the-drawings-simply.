@@ -17,6 +17,10 @@ with tempfile.TemporaryDirectory(prefix='IKGuide Проверка ', ignore_clea
     env = dict(os.environ, VISION_PORT=str(port))
     env.pop('TESSDATA_PREFIX', None)
     env.pop('IKGUIDE_TESSERACT', None)
+    diag = subprocess.run([str(root / 'vision-engine' / 'tesseract.exe'), '--list-langs'],
+                          env=dict(env, TESSDATA_PREFIX=str(root / 'vision-engine' / 'tessdata')),
+                          capture_output=True, timeout=30)
+    print('Tesseract diagnostic:', diag.returncode, repr(diag.stdout), repr(diag.stderr), flush=True)
     engine_log = tempfile.TemporaryFile(mode='w+b')
     process = subprocess.Popen([str(exe)], cwd=root, env=env, stdin=subprocess.DEVNULL,
                                stdout=engine_log, stderr=engine_log,
