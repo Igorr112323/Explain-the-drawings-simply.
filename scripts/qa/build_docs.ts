@@ -282,6 +282,14 @@ for (const file of files) {
     const illustrations = buildIllustrations(doc, fragments);
     const plan = buildInstructionPlan(doc, { cover: illustrations.cover, steps: illustrations.steps });
     record.planPages = plan.pages.length;
+    // Сравнение с исходными полями, а не поиск многоточия: оно может присутствовать в источнике.
+    const compact = (value: string) => value.replace(/\s+/g, '');
+    record.stepTextComplete = doc.steps.every((step) => {
+      const rendered = plan.pages.flatMap((page) => page.blocks)
+        .filter((block) => block.kind === 'text' && block.target?.type === 'step-text' && block.target.stepId === step.id)
+        .flatMap((block) => block.kind === 'text' ? block.lines : []).join('');
+      return compact(rendered) === compact(step.workerText);
+    });
     record.captionsOk = plan.pages
       .filter((page) => page.kind === 'step')
       .every((page) => Boolean(page.caption) || true);

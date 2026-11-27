@@ -305,7 +305,8 @@ describe('план PDF-инструкции', () => {
     const stepText = plan.pages
       .flatMap((page) => page.blocks)
       .filter((block): block is PlanText => block.kind === 'text' && 'target' in block && block.target?.type === 'step-text');
-    expect(stepText[0]?.lines.join(' ')).toContain('…');
+    expect(stepText.flatMap((block) => block.lines).join(' ')).toContain('Строка 120: сверьте размер по чертежу.');
+    expect(stepText.flatMap((block) => block.lines).join(' ')).not.toContain('…');
   });
 
   it('таблица позиций с огромными строками не наезжает на колонтитул', () => {
@@ -333,4 +334,31 @@ describe('план PDF-инструкции', () => {
       }
     }
   });
+  it('переносит одну очень длинную позицию без потери начала и конца', () => {
+    const words = Array.from({ length: 400 }, (_, i) => `деталь${i}`).join(' ');
+    const doc = ikGuideDocumentSchema.parse({ ...bracketDocument,
+      bom: [{ ...bracketDocument.bom[0], name: words, note: 'КОНЕЦ ПОЗИЦИИ' }] });
+    const plan = buildInstructionPlan(doc);
+    const all = plan.pages.flatMap((page) => page.blocks)
+      .filter((block): block is PlanText => block.kind === 'text' && block.y < PAGE.footerBaseline - 5)
+      .flatMap((block) => block.lines).join(' ');
+    for (const word of words.split(' ')) expect(all.split(/\s+/)).toContain(word);
+    expect(all).toContain('КОНЕЦ ПОЗИЦИИ');
+    for (const page of plan.pages) for (const block of page.blocks) {
+      if (block.kind === 'text' && block.y < PAGE.footerBaseline - 5)
+        expect(block.y + blockHeight(block.lines, block.size)).toBeLessThanOrEqual(PAGE.bodyBottom + 0.01);
+    }
+  });
+
+  it('длинная расшифровка не зацикливает разбиение и сохраняет конец', () => {
+    const longNote = Array.from({ length: 500 }, (_, i) => `расшифровка${i}`).join(' ');
+    const doc = ikGuideDocumentSchema.parse({ ...bracketDocument,
+      xrayAnnotations: [{ ...bracketDocument.xrayAnnotations[0], note: longNote }] });
+    const plan = buildInstructionPlan(doc);
+    const all = plan.pages.flatMap((page) => page.blocks)
+      .filter((block): block is PlanText => block.kind === 'text')
+      .flatMap((block) => block.lines).join(' ');
+    expect(all).toContain('расшифровка499');
+  });
+
 });

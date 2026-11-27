@@ -130,3 +130,21 @@ def test_engine_returns_text_lines_in_upright_coordinates(ocr_engine):
         assert 0 <= line.box.x < width
         assert 0 <= line.box.y < height
         assert isinstance(line, TextLine)
+
+
+def test_rapidocr_maps_resized_boxes_back_to_input():
+    from concurrent.futures import ThreadPoolExecutor
+    from app.ocr import RapidOcrEngine
+
+    engine = RapidOcrEngine.__new__(RapidOcrEngine)
+    engine._degraded = False
+    engine._max_side = 100
+    engine._timeout = 5
+    engine._executor = ThreadPoolExecutor(max_workers=1)
+    engine._run = lambda image: [OcrLine("Размер", 0.9, (10, 5, 20, 10), [(10, 5), (30, 15)])]
+    try:
+        result = engine.recognize(np.zeros((200, 400, 3), dtype=np.uint8))
+        assert result[0].box == (40, 20, 80, 40)
+        assert result[0].polygon == [(40, 20), (120, 60)]
+    finally:
+        engine._executor.shutdown()

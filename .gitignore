@@ -22,3 +22,5 @@ services/cad-api/.venv/
 # QA: сгенерированный корпус и артефакты прогонов (сотни МБ) — только локально
 qa/corpus/
 qa/output/
+
+qa/output-next/

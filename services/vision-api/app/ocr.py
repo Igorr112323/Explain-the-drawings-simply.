@@ -148,7 +148,17 @@ class RapidOcrEngine:
             return []
         future = self._executor.submit(self._run, prepared)
         try:
-            return future.result(timeout=self._timeout)
+            lines = future.result(timeout=self._timeout)
+            # Детектор работал на уменьшенной картинке, а вызывающий код ожидает
+            # координаты исходного изображения (иначе пины и кропы съезжают).
+            sx = image.shape[1] / prepared.shape[1]
+            sy = image.shape[0] / prepared.shape[0]
+            if sx != 1 or sy != 1:
+                for line in lines:
+                    x, y, w, h = line.box
+                    line.box = (round(x * sx), round(y * sy), max(1, round(w * sx)), max(1, round(h * sy)))
+                    line.polygon = [(x * sx, y * sy) for x, y in line.polygon]
+            return lines
         except FutureTimeout:
             self._degraded = True
             return []

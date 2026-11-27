@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 /**
  * Приёмочные сценарии IKGuide Studio в настоящем Chromium.
@@ -127,6 +128,9 @@ test('PDF скачивается браузером, ссылка на blob ос
   await page.getByLabel('Скачать PDF-инструкцию').click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/_инструкция\.pdf$/);
+  const downloadedPath = await download.path();
+  expect(downloadedPath).toBeTruthy();
+  expect((await readFile(downloadedPath!)).subarray(0, 5).toString('ascii')).toBe('%PDF-');
   await expect.poll(async () => page.evaluate(() => (window as unknown as { __revoked: string[] }).__revoked.length), {
     timeout: 15_000,
   }).toBeGreaterThan(0);
