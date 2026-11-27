@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 source = Path(sys.argv[1]).resolve()
-with tempfile.TemporaryDirectory(prefix='IKGuide Проверка ') as tmp:
+with tempfile.TemporaryDirectory(prefix='IKGuide Проверка ', ignore_cleanup_errors=True) as tmp:
     root = Path(tmp) / 'Движок с пробелом'
     shutil.copytree(source, root)
     exe = root / 'ikguide-vision.exe'

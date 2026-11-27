@@ -8,6 +8,7 @@ Every recognition call is bounded by a timeout so a stuck native call cannot fre
 from __future__ import annotations
 
 import os
+import logging
 import shutil
 import sys
 from pathlib import Path
@@ -279,7 +280,9 @@ def create_ocr_engine(preferred: str | None = None) -> tuple[OcrEngine, list[str
         warnings: list[str] = []
         tesseract = rapid = None
         try: tesseract = TesseractOcrEngine()
-        except Exception as error: warnings.append(f"ocr_engine_failed:tesseract:{type(error).__name__}")
+        except Exception as error:
+            logging.getLogger(__name__).warning("Tesseract initialization failed: %s: %s", type(error).__name__, error)
+            warnings.append(f"ocr_engine_failed:tesseract:{type(error).__name__}")
         try: rapid = RapidOcrEngine()
         except Exception as error: warnings.append(f"ocr_engine_failed:rapidocr:{type(error).__name__}")
         if tesseract and rapid: return HybridOcrEngine(tesseract, rapid), attempts, warnings
