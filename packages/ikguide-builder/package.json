@@ -1,0 +1,27 @@
+{
+  "name": "@ikguide/builder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Turns a /v1/recognize payload into a schema-valid .ikguide draft: tools, five-stage steps, QC and xray annotations. All GOST knowledge comes from @ikguide/gost-translator.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+  },
+  "dependencies": {
+    "@ikguide/gost-translator": "0.1.0",
+    "@ikguide/schema": "0.1.0"
+  }
+}

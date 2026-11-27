@@ -1,0 +1,23 @@
+{
+  "name": "@ikguide/gost-translator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic GOST/ESKD notation translator: metric threads, ISO 286 tolerances, roughness, welds, chamfers. No LLM involved.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+  }
+}

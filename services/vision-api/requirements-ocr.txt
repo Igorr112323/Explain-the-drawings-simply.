@@ -1,0 +1,4 @@
+# Optional OCR engine. The service runs without it (vector PDFs still work),
+# and reports `ocr.engine = "none"` until one of these is installed.
+rapidocr-onnxruntime>=1.3
+pytesseract>=0.3.10,<0.4

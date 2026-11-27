@@ -1,0 +1,11 @@
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.27,<1.0
+opencv-python-headless>=4.9
+numpy>=1.26
+pymupdf>=1.24
+pydantic>=2.5
+python-multipart>=0.0.9
+# Test-only (kept here so one command installs everything for `npm run test:vision`)
+pytest>=8.0
+httpx>=0.27
+pillow>=10.0

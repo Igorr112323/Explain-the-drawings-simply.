@@ -1,0 +1,177 @@
+name: CI
+
+# Every push and every pull request: TypeScript gates plus the Python recognition service.
+# Nothing here needs a native SDK, so it finishes in a couple of minutes.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  # The new workflow can only be directly dispatched after it exists on the default branch.
+  # Until then, manually dispatch this existing CI workflow on the working branch.
+  internet-corpus:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/qa-internet-corpus.yml
+    with:
+      maximum: '350'
+
+  web-and-tests:
+    name: Web · typecheck · tests · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (schema + translator + builder + studio)
+        run: npm run typecheck
+
+      - name: Vitest (studio, builder, schema)
+        run: npm test
+
+      - name: Build packages and the studio bundle
+        run: npm run build
+
+      - name: Install Chromium for browser E2E
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright E2E
+        run: npm run e2e
+
+      - name: Upload Playwright diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-diagnostics
+          path: test-results/
+          if-no-files-found: ignore
+
+      - name: Upload the studio build
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-web-dist
+          path: apps/studio-web/dist
+          retention-days: 7
+
+  python-services:
+    name: Python · vision-api tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Russian and English Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng
+
+      - name: Install vision-api dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/vision-api/requirements.txt
+          pip install -r services/vision-api/requirements-ocr.txt
+
+      - name: pytest vision-api
+        working-directory: services/vision-api
+        run: |
+          set +e
+          python -m pytest -q > pytest.log 2>&1
+          result=$?
+          cat pytest.log
+          if [ "$result" -ne 0 ]; then
+            python - <<'PY'
+          from pathlib import Path
+          log = Path('pytest.log').read_text(errors='replace')[-14000:]
+          escaped = log.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print('::error title=Vision pytest::' + escaped)
+          PY
+          fi
+          exit "$result"
+        env:
+          IKGUIDE_REQUIRE_RUSSIAN_OCR: '1'
+
+  # Настоящая проверка Rust-оболочки: в песочнице разработки нет rustc, поэтому компиляция
+  # Tauri проверяется здесь. cargo check не собирает установщик, но ловит ошибки кода и конфига.
+  rust-tauri-check:
+    name: Rust · cargo check (Tauri 2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Кэш cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop-tauri/src-tauri -> target
+
+      - name: Системные библиотеки Tauri (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
+
+      - name: Пакеты ядра и бандл студии (нужны для generate_context!)
+        run: npm ci && npm run build
+
+      - name: cargo check
+        working-directory: apps/desktop-tauri/src-tauri
+        run: cargo check --all-targets
+
+  config-syntax:
+    name: Configs · YAML · JSON · Tauri
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Зависимости (нужен пакет yaml для разбора workflow-файлов)
+        run: npm ci
+
+      - name: Validate every config file the release builds depend on
+        run: node scripts/check-native-configs.mjs
+
+      - name: Python 3.11 (для строгого разбора Cargo.toml)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cargo.toml — корректный TOML и нужные ключи
+        run: |
+          python3 - <<'PY'
+          import pathlib, tomllib
+          data = tomllib.loads(pathlib.Path('apps/desktop-tauri/src-tauri/Cargo.toml').read_text(encoding='utf-8'))
+          package = data['package']
+          assert package['name'] == 'ikguide-studio', package
+          assert package['edition'] == '2021', package
+          assert 'tauri' in data['dependencies']
+          assert 'tauri-build' in data['build-dependencies']
+          assert 'cdylib' in data['lib']['crate-type']
+          print('Cargo.toml корректен:', package['name'], package['version'])
+          PY

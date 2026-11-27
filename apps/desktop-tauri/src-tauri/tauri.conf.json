@@ -1,0 +1,66 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "IKGuide Studio",
+  "version": "1.2.0",
+  "identifier": "ru.ikguide.studio",
+  "build": {
+    "beforeDevCommand": "npm run build:packages --prefix ../.. && npm --workspace @ikguide/studio-web run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build --prefix ../..",
+    "frontendDist": "../../../apps/studio-web/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "IKGuide Studio",
+        "width": 1320,
+        "height": 840,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "center": true,
+        "visible": true,
+        "backgroundColor": "#FBFBFD",
+        "theme": "Light",
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http: https:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ],
+    "resources": [
+      "engine/*",
+      "engine/vision-engine/**/*"
+    ],
+    "copyright": "© IkGuide",
+    "category": "Productivity",
+    "shortDescription": "2D-чертёж → понятная PDF-инструкция",
+    "longDescription": "IkGuide: перетащите 2D-чертёж или PDF, проверьте предпросмотр и сохраните готовую PDF-инструкцию в стиле IKEA — со схемами шагов, расшифровкой ГОСТ-обозначений и чек-листом.",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "Russian"
+        ],
+        "displayLanguageSelector": false,
+        "template": "nsis/installer.nsi",
+        "headerImage": "nsis/nsis-header.bmp",
+        "sidebarImage": "nsis/nsis-sidebar.bmp"
+      }
+    }
+  }
+}

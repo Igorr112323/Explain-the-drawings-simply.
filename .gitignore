@@ -1,0 +1,32 @@
+node_modules/
+dist/
+dist-ssr/
+coverage/
+*.local
+.DS_Store
+.vite/
+*.log
+.env
+.env.*
+!.env.example
+src-tauri/target/
+
+# Python vision service
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+services/vision-api/.venv/
+services/cad-api/.venv/
+
+# QA: сгенерированный корпус и артефакты прогонов (сотни МБ) — только локально
+qa/corpus/
+qa/output/
+
+qa/output-next/
+
+qa/real_corpus/
+qa/real_output/
+qa/real_corpus_v2/
+qa/archetypes/
+qa/real_corpus_v3/

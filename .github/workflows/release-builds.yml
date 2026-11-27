@@ -1,0 +1,356 @@
+name: Build Windows .exe
+
+# Здесь и только здесь появляется настоящий `.exe`: в песочнице разработки нет Rust.
+# Запуск в один клик: Actions → «Build Windows .exe» → Run workflow. По тегу v* файлы ещё и
+# прикрепляются к GitHub Release.
+#
+# Что собирается:
+#   1. checks               — тесты, типы, веб-бандл, проверка нативных конфигов (быстро, Linux);
+#   2. build-windows-exe    — IKGuide Studio: установщик NSIS + переносимый .exe (Windows);
+#   3. build-engine-windows — локальный движок распознавания 2D-чертежей (PyInstaller, без консоли);
+#   4. build-portable-backend — архив с Python-сервисами и скриптом запуска (запасной путь).
+#
+# Установщик выпускается только после успешного smoke-теста упакованного движка.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия для имени файлов (например, 1.0.0)'
+        required: false
+        default: '1.0.0'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '20'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ---------------------------------------------------------------- Проверки
+  checks:
+    name: Тесты, типы, сборка
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Зависимости
+        run: npm ci
+
+      - name: Тесты
+        # Вывод дублируется в аннотацию при падении: логи Actions в некоторых средах недоступны,
+        # а имя упавшего теста должно быть видно прямо в сводке запуска.
+        run: |
+          # shell по умолчанию идёт с `-e`: без `set +e` шаг упадёт раньше отчёта.
+          set +e
+          npx vitest run --reporter=default --reporter=json --outputFile=vitest.json 2>&1 | tee vitest.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            node scripts/ci-test-report.mjs vitest.json vitest.log
+          fi
+          exit "$status"
+
+      - name: Типы
+        run: npm run typecheck
+
+      - name: Сборка веб-бандла
+        run: npm run build
+
+      - name: Конфигурация нативной упаковки
+        run: npm run check:native
+
+  # ---------------------------------------------------------------- Windows .exe
+  build-windows-exe:
+    name: Windows .exe (один файл со встроенным движком)
+    # Ставим после движка: его файлы вшиваются в установщик как ресурсы, чтобы человек скачал
+    # ровно один .exe и получил рабочий продукт.
+    needs: [checks, build-engine-windows]
+    runs-on: windows-latest
+    # Имя репозитория заканчивается точкой, а Windows не умеет папки с точкой на конце — поэтому
+    # штатный checkout в $GITHUB_WORKSPACE падает. Клонируем в короткий путь и работаем в нём.
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: C:\ikguide
+    steps:
+      - name: Checkout в короткий путь
+        shell: pwsh
+        working-directory: C:\
+        run: |
+          git clone --quiet "https://github.com/${{ github.repository }}.git" C:\ikguide
+          git -C C:\ikguide checkout --quiet "${{ github.sha }}"
+          git -C C:\ikguide log --oneline -1
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          # Без cargo/npm-кэшей: оба действия ожидают штатный $GITHUB_WORKSPACE, а рабочая папка
+          # здесь — C:\ikguide (имя репозитория кончается точкой). Пара минут важнее надёжности.
+
+      - name: Rust stable (MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      # Кэш cargo намеренно не используется: он ожидает checkout в $GITHUB_WORKSPACE, а здесь
+      # рабочая папка — C:\ikguide. Надёжность сборки важнее пары минут компиляции.
+
+      - name: Зависимости веб-части
+        run: npm ci
+
+      - name: Собрать пакеты и веб-бандл
+        run: npm run build
+
+      - name: Скачать собранный движок в бандл
+        uses: actions/download-artifact@v4
+        with:
+          name: ikguide-engine-windows
+          path: C:\ikguide\apps\desktop-tauri\src-tauri\engine
+
+      - name: Показать, что попадёт в установщик
+        run: Get-ChildItem C:\ikguide\apps\desktop-tauri\src-tauri\engine | Select-Object Name, Length
+
+      - name: Поставить Tauri CLI
+        run: npm install --prefix apps/desktop-tauri --no-audit --no-fund
+
+      - name: Проверить конфигурацию Tauri
+        # Логи Actions из некоторых сред недоступны: проваленные проверки печатаются аннотацией.
+        run: |
+          node scripts/check-native-configs.mjs 2>&1 | Tee-Object -FilePath native-check.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content native-check.log | Select-String -Pattern '✗' | Select-Object -First 25 | ForEach-Object {
+              $line = $_.ToString().Replace('%', '%25')
+              Write-Host "::error title=check:native::$line"
+            }
+            exit 1
+          }
+
+      - name: Собрать установщик (NSIS)
+        # Вывод дублируется в аннотацию при падении: логи Actions в некоторых средах недоступны,
+        # а причина должна быть видна сразу в сводке запуска.
+        run: |
+          # Только NSIS: WiX/MSI падает на кириллице в codepage 1252, а для «скачал один файл и
+          # запустил» нужен именно установщик NSIS.
+          npm --prefix apps/desktop-tauri run build -- --bundles nsis 2>&1 |
+            Tee-Object -FilePath C:\ikguide\tauri-build.log
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content C:\ikguide\tauri-build.log -Tail 20 | Out-String) -replace "`r?`n", ' | '
+            Write-Host "::error title=Сборка Tauri упала::$tail"
+            exit 1
+          }
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ''
+
+      - name: Разложить артефакты
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          # Лёгкий переносимый вариант (без встроенного движка): только для артефактов,
+          # в релиз уходит установщик со всем внутри.
+          Copy-Item "apps/desktop-tauri/src-tauri/target/release/ikguide-studio.exe" "artifacts/IKGuide-Studio-Portable-lite.exe"
+          # Установщик: NSIS собирает «IKGuide Studio_<версия>_x64-setup.exe».
+          $nsis = Get-ChildItem "apps/desktop-tauri/src-tauri/target/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if (-not $nsis) { throw "NSIS-установщик не собрался" }
+          Copy-Item $nsis.FullName "artifacts/IKGuide-Studio-Setup.exe"
+          Get-ChildItem artifacts | Select-Object Name, Length
+
+      - name: Артефакт ikguide-studio-windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: ikguide-studio-windows
+          path: C:\ikguide\artifacts\*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Прикрепить единственный файл к Release (только по тегу)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          # В релиз идёт ровно один установщик — всё остальное (движок, MSI, portable) лежит
+          # в артефактах запуска для тех, кому нужно.
+          files: C:\ikguide\artifacts\IKGuide-Studio-Setup.exe
+          fail_on_unmatched_files: true
+
+  # ------------------------------------------ Локальный движок (один .exe, PyInstaller)
+  build-engine-windows:
+    name: Движок Python (PyInstaller)
+    needs: checks
+    runs-on: windows-latest
+    # Движок обязателен: без него нельзя выпускать установщик.
+    # Та же причина, что и у .exe: короткий путь вместо $GITHUB_WORKSPACE с точкой на конце.
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: C:\ikguide
+    steps:
+      - name: Checkout в короткий путь
+        shell: pwsh
+        working-directory: C:\
+        run: |
+          git clone --quiet "https://github.com/${{ github.repository }}.git" C:\ikguide
+          git -C C:\ikguide checkout --quiet "${{ github.sha }}"
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Зависимости движка + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r services/vision-api/requirements.txt
+          # OCR (RapidOCR) обязателен: без него фото чертежа читается пустым.
+          python -m pip install -r services/vision-api/requirements-ocr.txt
+          python -m pip install pyinstaller
+
+      - name: Install Tesseract and language data
+        run: |
+          try {
+            choco install tesseract --yes --no-progress 2>&1 | Tee-Object -FilePath C:\ikguide\tesseract-install.log
+            if ($LASTEXITCODE -ne 0) { throw "Chocolatey failed: $LASTEXITCODE" }
+            $dir = 'C:\Program Files\Tesseract-OCR'
+            if (!(Test-Path "$dir\tesseract.exe")) { throw 'Tesseract installation not found' }
+            foreach ($lang in @('eng','rus')) {
+              Invoke-WebRequest -Uri "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/$lang.traineddata" -OutFile "$dir\tessdata\$lang.traineddata"
+              if ((Get-Item "$dir\tessdata\$lang.traineddata").Length -lt 1000000) { throw "$lang traineddata is incomplete" }
+            }
+          } catch {
+            $detail = ($_ | Out-String) + (Get-Content C:\ikguide\tesseract-install.log -Tail 15 -ErrorAction SilentlyContinue | Out-String)
+            $detail = $detail.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            Write-Host "::error title=Tesseract install::$detail"
+            throw
+          }
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Собрать ikguide-vision.exe
+        working-directory: C:\ikguide\services\vision-api
+        run: |
+          # Console executable keeps stdout/stderr usable by uvicorn; desktop starts it
+          # with CREATE_NO_WINDOW. --collect-all bundles the OCR models.
+          # RapidOCR и данные onnxruntime лежат внутри пакетов, без них OCR пустой.
+          python -m PyInstaller --noconfirm --onefile --console --name ikguide-vision `
+            --paths . --collect-submodules app --collect-all pytesseract `
+            --collect-all rapidocr_onnxruntime --collect-submodules onnxruntime `
+            --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto `
+            --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto `
+            --hidden-import uvicorn.lifespan.on `
+            engine_entry.py 2>&1 | Tee-Object -FilePath C:\ikguide\ikguide-vision.log
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content C:\ikguide\ikguide-vision.log -Tail 20 | Out-String) -replace "`r?`n", ' | '
+            Write-Host "::error title=PyInstaller ikguide-vision упал::$tail"
+            exit 1
+          }
+
+      - name: Сложить движок в папку engine
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/engine | Out-Null
+          Copy-Item services/vision-api/dist/ikguide-vision.exe artifacts/engine/
+          Copy-Item 'C:\Program Files\Tesseract-OCR' artifacts/engine/vision-engine -Recurse
+          @'
+          IKGuide Studio: локальный движок распознавания 2D-чертежей
+          ========================================================
+          В установщике этот файл уже лежит в папке engine — запускать вручную ничего не нужно.
+          Для переносимой сборки положите папку engine рядом с IKGuide-Studio-Portable-lite.exe.
+          Порт 8000, слушает только 127.0.0.1.
+          '@ | Set-Content -Encoding UTF8 artifacts/engine/ПРОЧТИ-МЕНЯ.txt
+          Get-ChildItem artifacts/engine
+
+      - name: Smoke-test packaged engine in Unicode path
+        run: |
+          python scripts/qa/smoke_windows_engine.py artifacts/engine 2>&1 | Tee-Object -FilePath C:\ikguide\smoke.log
+          if ($LASTEXITCODE -ne 0) {
+            $detail = (Get-Content C:\ikguide\smoke.log -Tail 40 | Out-String).Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            Write-Host "::error title=Windows engine smoke::$detail"
+            exit 1
+          }
+
+      - name: Собрать zip движка
+        run: Compress-Archive -Path C:\ikguide\artifacts\engine\* -DestinationPath C:\ikguide\artifacts\ikguide-engine.zip -Force
+
+      - name: Артефакт ikguide-engine-windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: ikguide-engine-windows
+          path: C:\ikguide\artifacts\engine\*
+          if-no-files-found: error
+          retention-days: 30
+
+  # ------------------------------------------------- Локальный бэкенд (архив)
+  build-portable-backend:
+    name: Локальный бэкенд (архив)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Собрать архив с сервисами и скриптом запуска
+        run: |
+          mkdir -p backend-package
+          cp -r services/vision-api backend-package/
+          rm -rf backend-package/*/.venv backend-package/*/__pycache__ backend-package/*/.pytest_cache
+          mkdir -p backend-package/scripts
+          cp scripts/start-backend.bat scripts/start-backend.sh backend-package/scripts/
+          cp README.md backend-package/README.md
+          cat > backend-package/КАК-ЗАПУСТИТЬ.txt <<'TXT'
+          IkGuide: локальный бэкенд
+          ========================
+
+          1. Установите Python 3.11 с python.org (обязательно отметьте «Add python.exe to PATH»).
+          2. Двойной щелчок по scripts\start-backend.bat — при первом запуске добавьте
+             аргумент install: start-backend.bat install
+          3. Запустите IkGuide Studio: он сам обратится к движку на 127.0.0.1:8000.
+
+          Сервисы слушают только этот компьютер: файлы чертежей никуда не отправляются.
+          Без интернета работают и распознавание, и сборка PDF.
+          TXT
+          cd backend-package && zip -r ../ikguide-backend.zip . && cd ..
+          ls -la ikguide-backend.zip
+
+      - name: Артефакт ikguide-backend
+        uses: actions/upload-artifact@v4
+        with:
+          name: ikguide-backend
+          path: ikguide-backend.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      # Архив бэкенда остаётся в артефактах: в релизе — ровно один файл, установщик.
+  # ----------------------------------------------------------------- Сводка
+  summary:
+    name: Итог
+    needs: [checks, build-windows-exe, build-engine-windows, build-portable-backend]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Сводка релиза
+        run: |
+          {
+            echo "## Сборки IkGuide Studio"
+            echo ""
+            echo "| Что | Статус |"
+            echo "| --- | --- |"
+            echo "| Тесты, типы, сборка | ${{ needs.checks.result }} |"
+            echo "| Windows .exe (установщик + portable) | ${{ needs.build-windows-exe.result }} |"
+            echo "| Движок Python (PyInstaller, обязателен) | ${{ needs.build-engine-windows.result }} |"
+            echo "| Локальный бэкенд (архив) | ${{ needs.build-portable-backend.result }} |"
+            echo ""
+            echo "Готовые файлы — в разделе **Artifacts** этого запуска (и в Release, если запуск по тегу)."
+            echo ""
+            echo "**Как запустить на чистой Windows:** распакуйте \`ikguide-studio-windows\` и \`ikguide-engine-windows\`,"
+            echo "положите папку \`engine\` рядом с \`IKGuide-Studio-Portable.exe\` (или в папку установки) —"
+            echo "приложение само поднимет движок без окна консоли."
+          } >> "$GITHUB_STEP_SUMMARY"
