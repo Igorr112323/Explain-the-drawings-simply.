@@ -200,6 +200,29 @@ class TesseractOcrEngine:
     def recognize(self, image: np.ndarray) -> list[OcrLine]:
         if min(image.shape[:2]) < 8:
             return []
+        result = self._recognize_region(image)
+        # A dense frame/hatching can make Tesseract segment the entire sheet as one object.
+        # Retry overlapping quadrants only when the whole-page pass found almost nothing.
+        h, w = image.shape[:2]
+        if len(result) < 3 and min(h, w) >= 800:
+            for x0, x1 in [(0, int(w * .58)), (int(w * .42), w)]:
+                for y0, y1 in [(0, int(h * .58)), (int(h * .42), h)]:
+                    for line in self._recognize_region(image[y0:y1, x0:x1]):
+                        x, y, bw, bh = line.box
+                        line.box = (x + x0, y + y0, bw, bh)
+                        line.polygon = [(px + x0, py + y0) for px, py in line.polygon]
+                        duplicate = False
+                        for previous in result:
+                            ax, ay, aw, ah = previous.box
+                            overlap = max(0, min(x+x0+bw, ax+aw)-max(x+x0, ax)) * max(0, min(y+y0+bh, ay+ah)-max(y+y0, ay))
+                            if overlap / max(1, min(aw*ah, bw*bh)) > .7:
+                                duplicate = True
+                                break
+                        if not duplicate:
+                            result.append(line)
+        return result
+
+    def _recognize_region(self, image: np.ndarray) -> list[OcrLine]:
         height, width = image.shape[:2]
         longest = max(width, height)
         factor = min(1.0, 2600 / longest)

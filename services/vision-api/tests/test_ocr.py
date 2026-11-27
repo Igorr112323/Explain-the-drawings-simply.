@@ -188,3 +188,18 @@ def test_russian_archetypes_with_real_tesseract(tmp_path):
         result = ' '.join(line.text for line in engine.recognize(image)).casefold()
         for token in tokens:
             assert token in result, f'{name}: missing {token!r}, got {result!r}'
+
+
+def test_tesseract_tiled_fallback_maps_coordinates():
+    from app.ocr import TesseractOcrEngine
+    engine = TesseractOcrEngine.__new__(TesseractOcrEngine)
+    calls = []
+    def fake(image):
+        calls.append(image.shape[:2])
+        if len(calls) == 1:
+            return []
+        return [OcrLine('10', .9, (10, 20, 40, 15), [(10, 20), (50, 35)])]
+    engine._recognize_region = fake
+    result = engine.recognize(np.zeros((1000, 1200, 3), dtype=np.uint8))
+    assert len(calls) == 5
+    assert {line.box[:2] for line in result} == {(10, 20), (10, 440), (514, 20), (514, 440)}
