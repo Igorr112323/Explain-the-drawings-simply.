@@ -225,8 +225,8 @@ jobs:
             $dir = 'C:\Program Files\Tesseract-OCR'
             if (!(Test-Path "$dir\tesseract.exe")) { throw 'Tesseract installation not found' }
             foreach ($lang in @('eng','rus')) {
-              gh api -H 'Accept: application/vnd.github.raw+json' "repos/tesseract-ocr/tessdata_fast/contents/$lang.traineddata" > "$dir\tessdata\$lang.traineddata"
-              if ($LASTEXITCODE -ne 0) { throw "Could not download $lang traineddata" }
+              Invoke-WebRequest -Uri "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/$lang.traineddata" -OutFile "$dir\tessdata\$lang.traineddata"
+              if ((Get-Item "$dir\tessdata\$lang.traineddata").Length -lt 1000000) { throw "$lang traineddata is incomplete" }
             }
           } catch {
             $detail = ($_ | Out-String) + (Get-Content C:\ikguide\tesseract-install.log -Tail 15 -ErrorAction SilentlyContinue | Out-String)

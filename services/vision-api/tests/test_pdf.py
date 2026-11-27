@@ -103,3 +103,18 @@ def test_scanned_and_vector_sources_differ(vector_pdf):
     raster = load_pdf_pages(scanned_pdf(120), 0)[0]
     assert vector.source != raster.source
     assert set(vector.warnings) != {"stamp_not_found"}
+
+
+def test_large_vector_sheet_scales_text_and_layout_with_preview():
+    import pymupdf
+    from app.pages import pages_from_upload
+    doc = pymupdf.open()
+    page = doc.new_page(width=2400, height=1800)
+    for i in range(12):
+        page.insert_text((100, 200 + i * 100), f'POSITION {i} M8-7H', fontsize=30)
+    data = doc.tobytes(); doc.close()
+    result = pages_from_upload(data, 'large.pdf', 0)[0]
+    assert result.source == 'pdf_vector'
+    assert result.layout.width == result.width
+    assert result.vector_lines
+    assert all(0 <= line.box.x < result.width and 0 <= line.box.y < result.height for line in result.vector_lines)

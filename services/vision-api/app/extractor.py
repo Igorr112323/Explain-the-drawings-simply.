@@ -14,6 +14,7 @@ from typing import Literal
 
 import cv2
 import numpy as np
+import pymupdf
 
 from .layout import Box, Layout
 from . import config
@@ -115,6 +116,13 @@ def extract_vector_lines(page: object, scale: float) -> list[TextLine]:
             cleaned = re.sub(r"\s+", " ", text).strip()
             if not cleaned:
                 continue
+            # PyMuPDF text boxes are unrotated even when the rendered page is rotated.
+            # Transform the aggregate box before mapping it to raster pixels.
+            page_rotation = int(getattr(page, "rotation", 0)) % 360
+            if page_rotation:
+                rect = pymupdf.Rect(x0 / scale, y0 / scale, x1 / scale, y1 / scale) * page.rotation_matrix
+                x0, y0, x1, y1 = (float(value) * scale for value in rect)
+                rotation = (rotation + page_rotation) % 360
             width = max(1, int(round(x1 - x0)))
             height = max(1, int(round(y1 - y0)))
             lines.append(

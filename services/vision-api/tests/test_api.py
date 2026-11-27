@@ -21,7 +21,7 @@ def test_health_reports_engine_and_threshold(client):
     assert payload["status"] == "ok"
     assert payload["service"] == "ikguide-vision-api"
     assert payload["opencv"]
-    assert payload["ocr"] in {"rapidocr", "rapidocr-cyrillic", "none"}
+    assert payload["ocr"] in {"rapidocr", "rapidocr-cyrillic", "tesseract-rus-eng", "tesseract-rus-eng+rapidocr", "none"}
     assert payload["confidenceThreshold"] == 0.95
     assert payload["maxPages"] >= 1
 

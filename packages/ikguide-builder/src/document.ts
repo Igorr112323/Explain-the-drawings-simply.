@@ -458,6 +458,9 @@ function buildSteps(
     (stage) => stage.id === 'preparation' || stage.id === 'control' || (entriesByStage.get(stage.id)?.length ?? 0) > 0,
   );
 
+  const detectedBoxes = [...entriesByStage.values()].flatMap((entries) =>
+    entries.map((entry) => entry.item.bbox).filter((box): box is SheetBox => Boolean(box)),
+  );
   const stagePieces: StepPiece[] = activeStages.map((stage) => {
     const group = entriesByStage.get(stage.id) ?? [];
     const parts: string[] = [stageIntro(stage.id, metadata, stamp)];
@@ -543,9 +546,10 @@ function buildSteps(
       criticalChecks,
       drawingRefs: group.map((entry) => entry.annotationId),
       crop: stage.id === 'preparation'
-        ? cropAround(sheet.stampBox ?? unionBoxes(sheet.bomRows.map((row) => row.bboxPercent)), 5) ?? cropForEntries(group, sheet.views)
+        ? cropAround(sheet.stampBox ?? unionBoxes(sheet.bomRows.map((row) => row.bboxPercent)), 5)
+          ?? (detectedBoxes.length ? { x: 0, y: 0, w: 100, h: 100 } : cropForEntries(group, sheet.views))
         : stage.id === 'control'
-          ? cropAround(unionBoxes(sheet.views.map((view) => view.bboxPercent)), 12) ?? cropForEntries(group, sheet.views)
+          ? cropAround(unionBoxes(sheet.views.map((view) => view.bboxPercent)) ?? unionBoxes(detectedBoxes), 12) ?? cropForEntries(group, sheet.views)
           : cropForEntries(group, sheet.views),
     };
   });

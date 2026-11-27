@@ -435,7 +435,10 @@ def main() -> None:
             fragments = record.get("fragments") or {}
             expects_images = bool(fragments.get("fragments"))
             pdf_reports.append(check_pdf(pdf_path, record.get("planPages"), expects_images, record.get("expectedTextFields")))
-        print(f"✓ PDF: {len(pdf_reports)} проверено, битых {sum(1 for item in pdf_reports if not item['ok'])}")
+        (out / "pdf_reports.jsonl").write_text(
+            "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in pdf_reports), encoding="utf-8"
+        )
+        print(f"✓ PDF: {len(pdf_reports)} проверено, с замечаниями {sum(1 for item in pdf_reports if not item['ok'])}")
 
         # ------------------------------------------------------------- фаззинг ГОСТ
         gost: dict | None = None

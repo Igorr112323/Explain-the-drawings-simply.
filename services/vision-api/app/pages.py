@@ -18,7 +18,7 @@ import numpy as np
 
 from . import config
 from .extractor import TextLine, extract_vector_lines
-from .layout import Layout, detect_layout
+from .layout import Box, Layout, detect_layout
 from .preprocessing import decode_image_bytes, limit_size, process_image, upscale_for_ocr
 from .schemas import QualityReport
 
@@ -178,7 +178,18 @@ def pages_from_upload(data: bytes, filename: str, start_index: int) -> list[Prep
     pages = load_document(data, filename, start_index)
     kept: list[PreparedPage] = []
     for page in pages[: config.MAX_PAGES]:
+        old_height, old_width = page.image.shape[:2]
         page.image = limit_size(page.image)
+        if page.width != old_width or page.height != old_height:
+            sx, sy = page.width / old_width, page.height / old_height
+            page.layout = page.layout.scaled(sx)
+            page.vector_lines = [
+                TextLine(line.text, Box(round(line.box.x * sx), round(line.box.y * sy),
+                                        max(1, round(line.box.w * sx)), max(1, round(line.box.h * sy))),
+                         line.confidence, line.rotation, line.source)
+                for line in page.vector_lines
+            ]
+            page.dpi = max(1, round(page.dpi * sx))
         # Мелкий лист OCR читает плохо: увеличиваем и переводим геометрию в новые пиксели.
         # Векторный PDF не трогаем — у него есть текстовый слой с точными координатами.
         if page.source != "pdf_vector":

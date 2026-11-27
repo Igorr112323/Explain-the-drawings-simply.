@@ -145,3 +145,19 @@ def test_lines_in_rect_selects_the_roi():
     ]
     selected = lines_in_rect(lines, Box(90, 90, 200, 100))
     assert [line.text for line in selected] == ["Ø20 H7"]
+
+
+def test_rotated_pdf_vector_boxes_are_in_rendered_page_coordinates():
+    import pymupdf
+    doc = pymupdf.open()
+    page = doc.new_page(width=400, height=200)
+    page.insert_text((30, 80), 'M8-7H 12', fontsize=20)
+    page.set_rotation(90)
+    lines = extract_vector_lines(page, 2.0)
+    assert lines
+    for line in lines:
+        assert 0 <= line.box.x < page.rect.width * 2
+        assert 0 <= line.box.y < page.rect.height * 2
+        assert line.box.x2 <= page.rect.width * 2
+        assert line.box.y2 <= page.rect.height * 2
+    doc.close()

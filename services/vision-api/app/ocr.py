@@ -202,7 +202,7 @@ class TesseractOcrEngine:
             return []
         height, width = image.shape[:2]
         longest = max(width, height)
-        factor = min(1.0, config.OCR_MAX_SIDE / longest)
+        factor = min(1.0, 2600 / longest)
         resized = cv2.resize(image, None, fx=factor, fy=factor, interpolation=cv2.INTER_AREA) if factor < 1 else image
         gray = resized if resized.ndim == 2 else cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
         # Remove only very pale marks, retaining dark drawing strokes and all midtones.
