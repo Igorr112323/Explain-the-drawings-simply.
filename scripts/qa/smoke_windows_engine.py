@@ -17,7 +17,10 @@ with tempfile.TemporaryDirectory(prefix='IKGuide Проверка ') as tmp:
     env = dict(os.environ, VISION_PORT=str(port))
     env.pop('TESSDATA_PREFIX', None)
     env.pop('IKGUIDE_TESSERACT', None)
-    process = subprocess.Popen([str(exe)], cwd=root, env=env)
+    engine_log = tempfile.TemporaryFile(mode='w+b')
+    process = subprocess.Popen([str(exe)], cwd=root, env=env, stdin=subprocess.DEVNULL,
+                               stdout=engine_log, stderr=engine_log,
+                               creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     try:
         base = f'http://127.0.0.1:{port}'
         for _ in range(90):
@@ -44,7 +47,19 @@ with tempfile.TemporaryDirectory(prefix='IKGuide Проверка ') as tmp:
         assert 'деталь' in content, content[:10000]
         assert '46' in content and '10' in content, content[:10000]
         print('Windows packaged OCR smoke passed:', health['ocr'])
+    except Exception:
+        engine_log.flush()
+        engine_log.seek(0)
+        print('Engine log:', engine_log.read().decode('utf-8', errors='replace')[-12000:])
+        raise
     finally:
-        process.terminate()
+        # Kill the PyInstaller process tree too: Tesseract subprocesses may otherwise retain
+        # files and prevent cleanup or keep the Actions log pipe open.
+        if os.name == 'nt' and process.poll() is None:
+            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20, check=False)
+        elif process.poll() is None:
+            process.terminate()
         try: process.wait(timeout=15)
         except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=10)
+        engine_log.close()

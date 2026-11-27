@@ -314,12 +314,16 @@ def main() -> None:
     environment = dict(os.environ)
     environment["IKGUIDE_OCR_ENGINE"] = environment.get("IKGUIDE_OCR_ENGINE", "auto")
     server = None
+    server_log = None
     if not args.reuse_vision:
+        # stderr must be drained while the server runs; an unread PIPE fills after several
+        # tracebacks and can deadlock the QA run. A file also preserves successful-run logs.
+        server_log = (out / "server_stderr.log").open("wb")
         server = subprocess.Popen(
             [str(PYTHON), "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(args.port), "--log-level", "warning"],
             cwd=VISION_DIR,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            stderr=server_log,
             env=environment,
         )
     try:
@@ -396,6 +400,9 @@ def main() -> None:
             except subprocess.TimeoutExpired:
                 server.kill()
             server = None
+            if server_log is not None:
+                server_log.close()
+                server_log = None
 
         # ------------------------------------------------------------- документы и PDF
         stats: list[dict] = []
@@ -471,10 +478,8 @@ def main() -> None:
                 server.wait(timeout=15)
             except subprocess.TimeoutExpired:
                 server.kill()
-            stderr = server.stderr.read().decode("utf-8", "replace") if server.stderr else ""
-            if stderr.strip():
-                (out / "server_stderr.log").write_text(stderr, encoding="utf-8")
-                print(f"! stderr сервера сохранён: {out / 'server_stderr.log'} ({len(stderr)} символов)")
+        if server_log is not None:
+            server_log.close()
 
 
 def summarize_vision(results: list[dict]) -> dict:

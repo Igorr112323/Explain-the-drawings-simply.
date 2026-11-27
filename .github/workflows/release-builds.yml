@@ -240,9 +240,10 @@ jobs:
       - name: Собрать ikguide-vision.exe
         working-directory: C:\ikguide\services\vision-api
         run: |
-          # --windowed: это sidecar, чёрное окно консоли не нужно. --collect-all: модели
+          # Console executable keeps stdout/stderr usable by uvicorn; desktop starts it
+          # with CREATE_NO_WINDOW. --collect-all bundles the OCR models.
           # RapidOCR и данные onnxruntime лежат внутри пакетов, без них OCR пустой.
-          python -m PyInstaller --noconfirm --onefile --windowed --name ikguide-vision `
+          python -m PyInstaller --noconfirm --onefile --console --name ikguide-vision `
             --paths . --collect-submodules app `
             --collect-all rapidocr_onnxruntime --collect-submodules onnxruntime `
             --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto `
