@@ -270,7 +270,13 @@ jobs:
           Get-ChildItem artifacts/engine
 
       - name: Smoke-test packaged engine in Unicode path
-        run: python scripts/qa/smoke_windows_engine.py artifacts/engine
+        run: |
+          python scripts/qa/smoke_windows_engine.py artifacts/engine 2>&1 | Tee-Object -FilePath C:\ikguide\smoke.log
+          if ($LASTEXITCODE -ne 0) {
+            $detail = (Get-Content C:\ikguide\smoke.log -Tail 40 | Out-String).Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            Write-Host "::error title=Windows engine smoke::$detail"
+            exit 1
+          }
 
       - name: Собрать zip движка
         run: Compress-Archive -Path C:\ikguide\artifacts\engine\* -DestinationPath C:\ikguide\artifacts\ikguide-engine.zip -Force

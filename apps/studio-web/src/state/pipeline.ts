@@ -206,16 +206,13 @@ export function usePipeline(): PipelineApi {
   const reset = useCallback(() => setState(INITIAL), []);
 
   const mutate = useCallback((fn: (doc: IkGuideDocument) => IkGuideDocument) => {
-    setState((prev) =>
-      prev.doc
-        ? {
-            ...prev,
-            doc: fn(prev.doc),
-            pdfJob: null,
-            history: [...prev.history, prev.doc].slice(-HISTORY_LIMIT),
-          }
-        : prev,
-    );
+    setState((prev) => {
+      if (!prev.doc) return prev;
+      const next = fn(prev.doc);
+      // Повторный commit того же значения не должен создавать фиктивный шаг Undo.
+      if (next === prev.doc || JSON.stringify(next) === JSON.stringify(prev.doc)) return prev;
+      return { ...prev, doc: next, pdfJob: null, history: [...prev.history, prev.doc].slice(-HISTORY_LIMIT) };
+    });
   }, []);
 
   /**
