@@ -315,8 +315,8 @@ check(
 check('release: установщик IKGuide-Studio-Setup.exe', releaseYaml.includes('IKGuide-Studio-Setup.exe'));
 check('release: движок PyInstaller отдельной джобой', /build-engine-windows/.test(releaseYaml) && releaseYaml.includes('pyinstaller'));
 check(
-  'release: падение PyInstaller не блокирует .exe',
-  /build-engine-windows:[\s\S]{0,400}continue-on-error:\s*true/.test(releaseYaml),
+  'release: движок обязателен для установщика',
+  !/build-engine-windows:[\s\S]{0,400}continue-on-error:\s*true/.test(releaseYaml) && releaseYaml.includes('smoke_windows_engine.py'),
 );
 check('release: архив локального бэкенда', releaseYaml.includes('ikguide-backend'));
 check('release: бэкенд не прикрепляется к релизу (один файл)', !/files:\s*ikguide-backend\.zip/.test(releaseYaml));

@@ -43,7 +43,8 @@
       "icons/icon.icns"
     ],
     "resources": [
-      "engine/*"
+      "engine/*",
+      "engine/vision-engine/**/*"
     ],
     "copyright": "© IkGuide",
     "category": "Productivity",

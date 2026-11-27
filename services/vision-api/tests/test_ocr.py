@@ -148,3 +148,17 @@ def test_rapidocr_maps_resized_boxes_back_to_input():
         assert result[0].polygon == [(40, 20), (120, 60)]
     finally:
         engine._executor.shutdown()
+
+
+def test_tesseract_russian_required_in_ci():
+    import os
+    from app.ocr import TesseractOcrEngine
+    if not os.environ.get("IKGUIDE_REQUIRE_RUSSIAN_OCR"):
+        pytest.skip("Russian Tesseract integration is required in CI")
+    engine = TesseractOcrEngine()
+    assert engine.name == "tesseract-rus-eng"
+    image = _crop_with_text("Деталь 46  Сталь", 72)
+    result = " ".join(line.text for line in engine.recognize(image)).lower()
+    assert "деталь" in result, result
+    assert "сталь" in result, result
+    assert "46" in result, result

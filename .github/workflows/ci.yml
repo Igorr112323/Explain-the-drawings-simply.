@@ -69,16 +69,20 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install Russian and English Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng
+
       - name: Install vision-api dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r services/vision-api/requirements.txt
-          # OCR is optional: without it the service still reads vector PDFs and reports `ocr: none`.
-          pip install -r services/vision-api/requirements-ocr.txt || echo "OCR недоступен — тесты не требуют его"
+          pip install -r services/vision-api/requirements-ocr.txt
 
       - name: pytest vision-api
         working-directory: services/vision-api
         run: python -m pytest -q
+        env:
+          IKGUIDE_REQUIRE_RUSSIAN_OCR: '1'
 
   # Настоящая проверка Rust-оболочки: в песочнице разработки нет rustc, поэтому компиляция
   # Tauri проверяется здесь. cargo check не собирает установщик, но ловит ошибки кода и конфига.

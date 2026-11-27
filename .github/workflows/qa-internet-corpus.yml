@@ -1,0 +1,64 @@
+name: QA internet corpus
+on:
+  workflow_dispatch:
+    inputs:
+      maximum:
+        description: Maximum candidate files
+        default: '500'
+        required: true
+permissions:
+  contents: read
+jobs:
+  corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Russian OCR
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng
+      - run: npm ci
+      - name: Python dependencies
+        run: |
+          python -m venv services/vision-api/.venv
+          services/vision-api/.venv/bin/pip install -r services/vision-api/requirements.txt -r services/vision-api/requirements-ocr.txt
+      - name: Discover and download candidates
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAX_FILES: ${{ inputs.maximum }}
+        run: services/vision-api/.venv/bin/python scripts/qa/fetch_internet_corpus.py --max "$MAX_FILES" --repos 30
+      - name: Run actual end-to-end QA
+        run: |
+          test "$(wc -l < qa/real_corpus/index.jsonl)" -gt 0
+          services/vision-api/.venv/bin/python scripts/qa/run_qa.py --corpus qa/real_corpus --out qa/real_output --port 8057 --timeout 180
+      - name: Report results
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          manifest = pathlib.Path('qa/real_corpus/manifest.json')
+          summary = pathlib.Path('qa/real_output/summary.json')
+          out = pathlib.Path('QA_REAL_INTERNET_REPORT.md')
+          text = '# Internet corpus QA\n\nCandidates are not manually validated drawings; license must be reviewed. OCR accuracy requires ground truth.\n\n'
+          for label, path in [('Download manifest', manifest), ('QA summary', summary)]:
+              text += f'## {label}\n\n'
+              text += '```json\n' + (json.dumps(json.loads(path.read_text()), ensure_ascii=False, indent=2) if path.exists() else 'Not available: see job logs.') + '\n```\n\n'
+          out.write_text(text, encoding='utf-8')
+          PY
+          mkdir -p qa/sample-pdf
+          find qa/real_output/pdf -name '*.pdf' -type f 2>/dev/null | head -20 | xargs -r -I '{}' cp '{}' qa/sample-pdf/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qa-internet-report
+          path: |
+            QA_REAL_INTERNET_REPORT.md
+            qa/real_corpus/manifest.json
+            qa/real_output/summary.json
+            qa/sample-pdf/
+          if-no-files-found: warn

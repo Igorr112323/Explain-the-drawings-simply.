@@ -13,6 +13,8 @@ const CONSOLE_ERRORS: string[] = [];
 
 test.beforeEach(async ({ page }) => {
   CONSOLE_ERRORS.length = 0;
+  // Built-in demo tests do not need the OCR service. Avoid a Vite proxy 500 when it is offline.
+  await page.route('**/health', (route) => route.fulfill({ json: { service: 'ikguide-vision-api', status: 'ok' } }));
   page.on('console', (message) => {
     if (message.type() === 'error') {
       CONSOLE_ERRORS.push(message.text());
@@ -53,12 +55,12 @@ test('масштаб держится в границах 40…250 % и возв
   await openDemo(page);
   expect(await zoomLabel(page)).toContain('72%');
 
-  for (let step = 0; step < 6; step += 1) {
+  while (await page.getByLabel('Уменьшить масштаб').isEnabled()) {
     await page.getByLabel('Уменьшить масштаб').click();
   }
   expect(await zoomLabel(page)).toContain('40%');
 
-  for (let step = 0; step < 12; step += 1) {
+  while (await page.getByLabel('Увеличить масштаб').isEnabled()) {
     await page.getByLabel('Увеличить масштаб').click();
   }
   expect(await zoomLabel(page)).toContain('250%');
@@ -72,7 +74,22 @@ test('масштаб держится в границах 40…250 % и возв
 });
 
 test('«Рентген» ставит пины на лист и объясняет обозначение по ГОСТ', async ({ page }) => {
-  await openDemo(page);
+  // The demo has no source raster. Use a deterministic recognition response for the pin UI;
+  // OCR itself is tested separately in the vision-api integration tests.
+  const pixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=';
+  await page.route('**/v1/recognize', (route) => route.fulfill({ json: {
+    pages: [{ pageIndex: 0, pageId: 'p0', source: 'image', width: 1600, height: 1130,
+      dpi: 200, perspectiveCorrected: false, warnings: [], imageDataUrl: `data:image/png;base64,${pixel}` }],
+    titleBlock: { name: 'Кронштейн', code: 'КС-04', material: 'Сталь', scale: '1:1', sheet: null, confidence: .95, rawLines: [] },
+    candidates: [{ id: 'c1', pageIndex: 0, rawText: 'Ø20 H7', normalizedText: 'Ø20 H7', xPercent: 40, yPercent: 30,
+      bboxPercent: { x: 39, y: 29, w: 6, h: 3 }, confidence: .98, ambiguousOptions: [], region: 'field', source: 'ocr' }], warnings: []
+  } }));
+  await page.getByLabel('Файл 2D-чертежа или PDF').setInputFiles({ name: 'drawing.png', mimeType: 'image/png', buffer: Buffer.from(pixel, 'base64') });
+  await expect(page.locator('.page-caption').first()).toBeVisible();
+  await page.locator('.zoom-value').click();
+  await page.getByLabel('Увеличить масштаб').click();
+  await page.getByLabel('Увеличить масштаб').click();
+  expect(await zoomLabel(page)).toContain('150%');
   await page.getByLabel('Рентген ГОСТ и допуски').click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
@@ -92,13 +109,13 @@ test('правка шага на листе отменяется кнопкой 
   expect(original.length).toBeGreaterThan(20);
 
   await step.click();
-  const editor = page.locator('[aria-label$=": изменить"]').first();
+  const editor = dialog.getByRole('textbox', { name: 'Текст шага 1' });
   await editor.fill('Сверлите отверстия строго по маркеру мастера.');
   await page.keyboard.press('Control+Enter');
 
-  await expect(page.locator('.page').first()).toContainText('маркеру');
+  await expect(page.locator('.sheets')).toContainText('маркеру');
   await page.getByLabel('Отменить последнее действие').click();
-  await expect(page.locator('.page').first()).not.toContainText('маркеру');
+  await expect(page.locator('.sheets')).not.toContainText('маркеру');
 });
 
 test('пометка «Осторожно!» ставится и уходит на лист', async ({ page }) => {
@@ -106,7 +123,7 @@ test('пометка «Осторожно!» ставится и уходит н
   await page.getByLabel('Добавить пометку «Осторожно!»').click();
   await expect(page.getByLabel('Плашка «Осторожно!» у шага')).toBeVisible();
   const sheets = await page.locator('.page').allInnerTexts();
-  expect(sheets.join(' ')).toContain('Осторожно');
+  expect(sheets.join(' ')).toContain('ОСТОРОЖНО');
 });
 
 test('тема переключается и переживает перезагрузку страницы', async ({ page }) => {

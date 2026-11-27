@@ -10,8 +10,7 @@ name: Build Windows .exe
 #   3. build-engine-windows — локальный движок распознавания 2D-чертежей (PyInstaller, без консоли);
 #   4. build-portable-backend — архив с Python-сервисами и скриптом запуска (запасной путь).
 #
-# Джоб движка помечен `continue-on-error: true`: если PyInstaller на новой версии зависимости
-# споткнётся, сам продукт (UI + установщик) всё равно соберётся и выгрузится в Artifacts.
+# Установщик выпускается только после успешного smoke-теста упакованного движка.
 
 on:
   push:
@@ -119,7 +118,6 @@ jobs:
 
       - name: Скачать собранный движок в бандл
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: ikguide-engine-windows
           path: C:\ikguide\apps\desktop-tauri\src-tauri\engine
@@ -192,8 +190,7 @@ jobs:
     name: Движок Python (PyInstaller)
     needs: checks
     runs-on: windows-latest
-    # Тяжёлая и капризная упаковка не должна блокировать выпуск UI-сборки.
-    continue-on-error: true
+    # Движок обязателен: без него нельзя выпускать установщик.
     # Та же причина, что и у .exe: короткий путь вместо $GITHUB_WORKSPACE с точкой на конце.
     defaults:
       run:
@@ -220,6 +217,19 @@ jobs:
           python -m pip install -r services/vision-api/requirements-ocr.txt
           python -m pip install pyinstaller
 
+      - name: Install Tesseract and language data
+        run: |
+          choco install tesseract --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $dir = 'C:\Program Files\Tesseract-OCR'
+          if (!(Test-Path "$dir\tesseract.exe")) { throw 'Tesseract installation not found' }
+          foreach ($lang in @('eng','rus')) {
+            gh api -H 'Accept: application/vnd.github.raw+json' "repos/tesseract-ocr/tessdata_fast/contents/$lang.traineddata" > "$dir\tessdata\$lang.traineddata"
+            if ($LASTEXITCODE -ne 0) { throw "Could not download $lang traineddata" }
+          }
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Собрать ikguide-vision.exe
         working-directory: C:\ikguide\services\vision-api
         run: |
@@ -242,6 +252,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path artifacts/engine | Out-Null
           Copy-Item services/vision-api/dist/ikguide-vision.exe artifacts/engine/
+          Copy-Item 'C:\Program Files\Tesseract-OCR' artifacts/engine/vision-engine -Recurse
           @'
           IKGuide Studio: локальный движок распознавания 2D-чертежей
           ========================================================
@@ -251,6 +262,9 @@ jobs:
           '@ | Set-Content -Encoding UTF8 artifacts/engine/ПРОЧТИ-МЕНЯ.txt
           Get-ChildItem artifacts/engine
 
+      - name: Smoke-test packaged engine in Unicode path
+        run: python scripts/qa/smoke_windows_engine.py artifacts/engine
+
       - name: Собрать zip движка
         run: Compress-Archive -Path C:\ikguide\artifacts\engine\* -DestinationPath C:\ikguide\artifacts\ikguide-engine.zip -Force
 
@@ -259,7 +273,7 @@ jobs:
         with:
           name: ikguide-engine-windows
           path: C:\ikguide\artifacts\engine\*
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
 
   # ------------------------------------------------- Локальный бэкенд (архив)
@@ -317,7 +331,7 @@ jobs:
             echo "| --- | --- |"
             echo "| Тесты, типы, сборка | ${{ needs.checks.result }} |"
             echo "| Windows .exe (установщик + portable) | ${{ needs.build-windows-exe.result }} |"
-            echo "| Движок Python (PyInstaller, не блокирует .exe) | ${{ needs.build-engine-windows.result }} |"
+            echo "| Движок Python (PyInstaller, обязателен) | ${{ needs.build-engine-windows.result }} |"
             echo "| Локальный бэкенд (архив) | ${{ needs.build-portable-backend.result }} |"
             echo ""
             echo "Готовые файлы — в разделе **Artifacts** этого запуска (и в Release, если запуск по тегу)."

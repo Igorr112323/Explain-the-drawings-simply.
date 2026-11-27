@@ -62,6 +62,8 @@ export interface VisionPage {
   warnings: string[];
   /** Во сколько раз лист увеличен перед OCR (мелкий скан). */
   upscale?: number;
+  /** Области, найденные сервисом; координаты в процентах листа. */
+  zones?: Array<{ kind: string; bboxPercent: { x: number; y: number; w: number; h: number } }>;
   /** Cleaned sheet as a PNG data URL (used by the «Рентген» screen). */
   imageDataUrl?: string;
 }

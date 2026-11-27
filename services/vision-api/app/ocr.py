@@ -8,6 +8,9 @@ Every recognition call is bounded by a timeout so a stuck native call cannot fre
 from __future__ import annotations
 
 import os
+import shutil
+import sys
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -166,20 +169,104 @@ class RapidOcrEngine:
             return []
 
 
+class TesseractOcrEngine:
+    """Russian+English OCR; only advertises Russian when both traineddata files load."""
+
+    name = "tesseract-rus-eng"
+
+    def __init__(self, timeout: float = OCR_TIMEOUT_SECONDS) -> None:
+        import pytesseract
+        self._tesseract = pytesseract
+        self._timeout = timeout
+        explicit = os.getenv("IKGUIDE_TESSERACT", "").strip()
+        base = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
+        candidates = [base / "vision-engine" / "tesseract.exe", base / "tesseract" / "tesseract.exe"]
+        binary = explicit or next((str(p) for p in candidates if p.is_file()), "") or shutil.which("tesseract")
+        if not binary:
+            raise FileNotFoundError("tesseract binary not found")
+        pytesseract.pytesseract.tesseract_cmd = binary
+        bundled = Path(binary).parent / "tessdata"
+        if bundled.is_dir():
+            os.environ["TESSDATA_PREFIX"] = str(bundled)
+        languages = set(pytesseract.get_languages(config=""))
+        if not {"rus", "eng"}.issubset(languages):
+            raise RuntimeError(f"Tesseract requires rus and eng traineddata: {sorted(languages)}")
+        self._version = str(pytesseract.get_tesseract_version())
+
+    @property
+    def version(self) -> str:
+        return self._version
+
+    def recognize(self, image: np.ndarray) -> list[OcrLine]:
+        if min(image.shape[:2]) < 8:
+            return []
+        height, width = image.shape[:2]
+        longest = max(width, height)
+        factor = min(1.0, config.OCR_MAX_SIDE / longest)
+        resized = cv2.resize(image, None, fx=factor, fy=factor, interpolation=cv2.INTER_AREA) if factor < 1 else image
+        gray = resized if resized.ndim == 2 else cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        # Remove only very pale marks, retaining dark drawing strokes and all midtones.
+        gray = gray.copy()
+        gray[gray > 238] = 255
+        data = self._tesseract.image_to_data(gray, lang="rus+eng", config="--psm 11", timeout=self._timeout,
+                                             output_type=self._tesseract.Output.DICT)
+        groups: dict[tuple[int, int, int], list[int]] = {}
+        for i, value in enumerate(data['text']):
+            try: score = float(data['conf'][i])
+            except (ValueError, TypeError): continue
+            if value.strip() and score >= 0:
+                groups.setdefault((data['block_num'][i], data['par_num'][i], data['line_num'][i]), []).append(i)
+        result: list[OcrLine] = []
+        sx, sy = width / gray.shape[1], height / gray.shape[0]
+        for ids in groups.values():
+            x0 = min(data['left'][i] for i in ids); y0 = min(data['top'][i] for i in ids)
+            x1 = max(data['left'][i] + data['width'][i] for i in ids)
+            y1 = max(data['top'][i] + data['height'][i] for i in ids)
+            x, y = round(x0 * sx), round(y0 * sy)
+            w, h = max(1, round((x1-x0)*sx)), max(1, round((y1-y0)*sy))
+            result.append(OcrLine(' '.join(data['text'][i].strip() for i in ids),
+                                  min(.999, max(0., sum(float(data['conf'][i]) for i in ids) / len(ids) / 100)),
+                                  (x, y, w, h), [(x,y), (x+w,y), (x+w,y+h), (x,y+h)]))
+        return result
+
+
+class HybridOcrEngine:
+    """Tesseract is primary for Russian; RapidOCR adds non-overlapping detections."""
+    name = "tesseract-rus-eng+rapidocr"
+
+    def __init__(self, tesseract: TesseractOcrEngine, rapid: RapidOcrEngine):
+        self.tesseract, self.rapid = tesseract, rapid
+        self.version = f"{tesseract.version}+{rapid.version}"
+
+    def recognize(self, image: np.ndarray) -> list[OcrLine]:
+        try: primary = self.tesseract.recognize(image)
+        except Exception: primary = []
+        secondary = self.rapid.recognize(image)
+        def overlaps(a: OcrLine, b: OcrLine) -> bool:
+            ax, ay, aw, ah = a.box; bx, by, bw, bh = b.box
+            area = max(0, min(ax+aw,bx+bw)-max(ax,bx)) * max(0, min(ay+ah,by+bh)-max(ay,by))
+            return area / max(1, min(aw*ah, bw*bh)) > .5
+        return primary + [line for line in secondary if not any(overlaps(line, existing) for existing in primary)]
+
+
 def create_ocr_engine(preferred: str | None = None) -> tuple[OcrEngine, list[str], list[str]]:
     """Returns (engine, attempted, warnings). Never raises: OCR is optional."""
-    attempts = ["rapidocr"] if not preferred else ([preferred] if preferred != "auto" else ["rapidocr"])
-    warnings: list[str] = []
-
-    for candidate in attempts:
-        if candidate == "rapidocr":
-            try:
-                engine = RapidOcrEngine()
-                return engine, attempts, warnings
-            except Exception as error:  # missing model/dependency/broken wheel
-                warnings.append(f"ocr_engine_failed:rapidocr:{type(error).__name__}")
-                continue
-        warnings.append(f"ocr_engine_unknown:{candidate}")
-
-    warnings.append("ocr_unavailable")
-    return NoopOcrEngine(), attempts, warnings
+    if preferred in (None, "auto", "hybrid"):
+        attempts = ["tesseract-rus-eng", "rapidocr"]
+        warnings: list[str] = []
+        tesseract = rapid = None
+        try: tesseract = TesseractOcrEngine()
+        except Exception as error: warnings.append(f"ocr_engine_failed:tesseract:{type(error).__name__}")
+        try: rapid = RapidOcrEngine()
+        except Exception as error: warnings.append(f"ocr_engine_failed:rapidocr:{type(error).__name__}")
+        if tesseract and rapid: return HybridOcrEngine(tesseract, rapid), attempts, warnings
+        if tesseract: return tesseract, attempts, warnings
+        if rapid: return rapid, attempts, warnings
+        return NoopOcrEngine(), attempts, warnings + ["ocr_unavailable"]
+    attempts = [preferred]
+    try:
+        if preferred == "rapidocr": return RapidOcrEngine(), attempts, []
+        if preferred == "tesseract": return TesseractOcrEngine(), attempts, []
+    except Exception as error:
+        return NoopOcrEngine(), attempts, [f"ocr_engine_failed:{preferred}:{type(error).__name__}", "ocr_unavailable"]
+    return NoopOcrEngine(), attempts, [f"ocr_engine_unknown:{preferred}", "ocr_unavailable"]

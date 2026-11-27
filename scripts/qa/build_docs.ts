@@ -281,6 +281,13 @@ for (const file of files) {
     record.fragments = fragmentStats;
     const illustrations = buildIllustrations(doc, fragments);
     const plan = buildInstructionPlan(doc, { cover: illustrations.cover, steps: illustrations.steps });
+    // Оригинальные поля для проверки *извлечённого PDF*, не только плана.
+    record.expectedTextFields = [
+      ...doc.steps.flatMap((step) => [step.title, step.workerText, step.antiError?.text,
+        ...step.criticalChecks.flatMap((check) => [check.nominal, check.acceptance, check.instrument])]),
+      ...doc.bom.flatMap((item) => [item.name, item.standard, item.size, item.note, `${item.quantity} шт.`]),
+      ...doc.tools.flatMap((tool) => [tool.name, tool.size, tool.purpose]),
+    ].filter((value): value is string => typeof value === 'string' && Boolean(value.trim()));
     record.planPages = plan.pages.length;
     // Сравнение с исходными полями, а не поиск многоточия: оно может присутствовать в источнике.
     const compact = (value: string) => value.replace(/\s+/g, '');

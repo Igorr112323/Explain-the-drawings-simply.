@@ -129,7 +129,7 @@ def extract_vector_lines(page: object, scale: float) -> list[TextLine]:
     return lines
 
 
-def ocr_lines(image: np.ndarray, engine: OcrEngine, rotations: tuple[int, ...] = (0, 90)) -> list[TextLine]:
+def ocr_lines(image: np.ndarray, engine: OcrEngine, rotations: tuple[int, ...] = (0, 90, 270)) -> list[TextLine]:
     """OCR in several orientations; boxes are mapped back to the upright sheet."""
     height, width = image.shape[:2]
     lines: list[TextLine] = []
@@ -158,7 +158,7 @@ def ocr_region(
     engine: OcrEngine,
     rect: Box,
     upscale: float = config.ROI_UPSCALE,
-    rotations: tuple[int, ...] = (0, 90),
+    rotations: tuple[int, ...] = (0, 90, 270),
 ) -> list[TextLine]:
     """Re-reads a user-drawn rectangle: crops, upscales and maps boxes back to the sheet."""
     height, width = image.shape[:2]

@@ -102,6 +102,23 @@ describe('buildGuideFromVision', () => {
     expect(result.stats.steps).toBe(5);
   });
 
+  it('uses the detected stamp for preparation and views for final control', () => {
+    const input = payload(BRACKET_CANDIDATES);
+    input.pages![0]!.zones = [{ kind: 'title_block', bboxPercent: { x: 72, y: 80, w: 20, h: 15 } }];
+    input.views = [
+      { name: 'Спереди', xPercent: 20, yPercent: 30, bboxPercent: { x: 10, y: 15, w: 30, h: 25 } },
+      { name: 'Сбоку', xPercent: 65, yPercent: 30, bboxPercent: { x: 55, y: 15, w: 30, h: 25 } },
+    ];
+    const steps = buildGuideFromVision(input, FIXED_OPTIONS).document.steps;
+    const prep = steps[0]!.cropPercent!;
+    const control = steps[steps.length - 1]!.cropPercent!;
+    expect(prep.y).toBeGreaterThan(70);
+    expect(control.y).toBeLessThan(20);
+    expect(prep).not.toEqual(control);
+    expect(steps.filter((step) => step.title.includes('Ориентир')).map((step) => step.cropPercent))
+      .toEqual([expect.objectContaining({ x: 4 }), expect.objectContaining({ x: 49 })]);
+  });
+
   it('links every step to existing xray annotations', () => {
     const { document } = buildGuideFromVision(payload(BRACKET_CANDIDATES), FIXED_OPTIONS);
     const annotationIds = new Set(document.xrayAnnotations.map((annotation) => annotation.id));

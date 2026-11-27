@@ -452,7 +452,7 @@ function buildSteps(
   metadata: IkGuideMetadata,
   stamp: VisionTitleBlock | null,
   warnings: string[],
-  sheet: { bomRows: readonly VisionBomRow[]; views: readonly VisionSheetView[] },
+  sheet: { bomRows: readonly VisionBomRow[]; views: readonly VisionSheetView[]; stampBox?: SheetBox },
 ): { steps: GuideStep[]; stepNumberByStage: Map<StageId, number> } {
   const activeStages = STAGES.filter(
     (stage) => stage.id === 'preparation' || stage.id === 'control' || (entriesByStage.get(stage.id)?.length ?? 0) > 0,
@@ -542,7 +542,11 @@ function buildSteps(
       antiError,
       criticalChecks,
       drawingRefs: group.map((entry) => entry.annotationId),
-      crop: cropForEntries(group, sheet.views),
+      crop: stage.id === 'preparation'
+        ? cropAround(sheet.stampBox ?? unionBoxes(sheet.bomRows.map((row) => row.bboxPercent)), 5) ?? cropForEntries(group, sheet.views)
+        : stage.id === 'control'
+          ? cropAround(unionBoxes(sheet.views.map((view) => view.bboxPercent)), 12) ?? cropForEntries(group, sheet.views)
+          : cropForEntries(group, sheet.views),
     };
   });
 
@@ -617,7 +621,7 @@ function assemble(
   viewId: string,
   incomingWarnings: readonly string[],
   skipped: SkippedCandidate[],
-  sheet: { bomRows: readonly VisionBomRow[]; views: readonly VisionSheetView[] } = { bomRows: [], views: [] },
+  sheet: { bomRows: readonly VisionBomRow[]; views: readonly VisionSheetView[]; stampBox?: SheetBox } = { bomRows: [], views: [] },
 ): BuildResult {
   const warnings = [...incomingWarnings];
   const annotations: XrayAnnotation[] = [];
@@ -843,7 +847,8 @@ export function buildGuideFromVision(response: VisionRecognizeResponse, options:
     response.pages?.[0]?.pageId ?? 'sheet-1',
     response.warnings ?? [],
     skipped,
-    { bomRows: response.bomRows ?? [], views: response.views ?? [] },
+    { bomRows: response.bomRows ?? [], views: response.views ?? [],
+      stampBox: response.pages?.[0]?.zones?.find((zone) => zone.kind === 'title_block')?.bboxPercent },
   );
 }
 

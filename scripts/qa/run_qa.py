@@ -126,7 +126,7 @@ def bundle(entry: Path, out: Path) -> Path:
 # ---------------------------------------------------------------------------- проверка PDF
 
 
-def check_pdf(path: Path, expected_pages: int | None, expected_images: bool = False) -> dict:
+def check_pdf(path: Path, expected_pages: int | None, expected_images: bool = False, expected_fields: list[str] | None = None) -> dict:
     """Проверяет настоящий PDF: страницы, кириллицу, подписи, наложения, картинки."""
     result: dict = {"slug": path.stem, "ok": True, "problems": []}
     try:
@@ -160,9 +160,11 @@ def check_pdf(path: Path, expected_pages: int | None, expected_images: bool = Fa
     broken_images = 0
     overlaps = 0
     out_of_bounds = 0
+    extracted_pages: list[str] = []
     for page_index in range(pages):
         page = document.load_page(page_index)
         text = page.get_text("text")
+        extracted_pages.append(text)
         text_total += len(text)
         cyrillic_total += len(re.findall(r"[А-Яа-яЁё]", text))
         if BAD_TEXT.search(text):
@@ -211,6 +213,24 @@ def check_pdf(path: Path, expected_pages: int | None, expected_images: bool = Fa
             except Exception:
                 broken_images += 1
 
+    # Compare actual extracted text with each source field, in order within each field.
+    # Ignore spacing at word wraps; do not treat an existing ellipsis in source as truncation.
+    normalize = lambda value: re.sub(r"\s+", "", value).casefold()
+    extracted = normalize("".join(extracted_pages))
+    missing = []
+    for value in expected_fields or []:
+        words = re.findall(r"[\wØø±°×]+", value, re.UNICODE)
+        cursor = 0
+        for word in words:
+            found = extracted.find(normalize(word), cursor)
+            if found < 0:
+                missing.append(value[:160]); break
+            cursor = found + len(normalize(word))
+    result["contentFieldsChecked"] = len(expected_fields or [])
+    result["contentFieldsMissing"] = len(missing)
+    if missing:
+        result["problems"].append(f"pdf_missing_source_fields:{len(missing)}")
+        result["missingExamples"] = missing[:5]
     result["captions"] = len(captions)
     result["textChars"] = text_total
     result["cyrillic"] = cyrillic_total
@@ -414,7 +434,7 @@ def main() -> None:
                 continue
             fragments = record.get("fragments") or {}
             expects_images = bool(fragments.get("fragments"))
-            pdf_reports.append(check_pdf(pdf_path, record.get("planPages"), expects_images))
+            pdf_reports.append(check_pdf(pdf_path, record.get("planPages"), expects_images, record.get("expectedTextFields")))
         print(f"✓ PDF: {len(pdf_reports)} проверено, битых {sum(1 for item in pdf_reports if not item['ok'])}")
 
         # ------------------------------------------------------------- фаззинг ГОСТ
@@ -544,6 +564,8 @@ def summarize_pdf(reports: list[dict]) -> dict:
     cyrillic_ok = sum(1 for item in reports if item.get("cyrillic", 0) > 0)
     return {
         "checked": len(reports),
+        "sourceFieldsMeasured": sum(1 for item in reports if item.get("contentFieldsChecked", 0) > 0),
+        "sourceFieldsComplete": sum(1 for item in reports if item.get("contentFieldsChecked", 0) > 0 and item.get("contentFieldsMissing") == 0),
         "ok": sum(1 for item in reports if item["ok"]),
         "problems": dict(problems),
         "withCyrillic": cyrillic_ok,
