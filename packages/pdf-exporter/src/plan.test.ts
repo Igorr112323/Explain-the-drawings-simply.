@@ -9,6 +9,7 @@ import {
   type PlanTarget,
   type PlanText,
 } from './plan';
+import { blockHeight } from './text';
 
 const bracketDocument = ikGuideDocumentSchema.parse({
   schemaVersion: '1.0',
@@ -265,5 +266,71 @@ describe('план PDF-инструкции', () => {
     );
     expect(instructionFileName('Втулка 3/4" <сборка>', 'АБВ:1')).toBe('Втулка_3_4_сборка_АБВ_1_инструкция.pdf');
     expect(instructionFileName('   ')).toBe('инструкция.pdf');
+  });
+
+  it('ни один блок не уходит ниже тела листа, даже если шаг распух от OCR', () => {
+    // Найдено на 1 060-файловом прогоне: длинный шаг из распознанного листа печатался поверх
+    // колонтитула и за край бумаги (58 документов из 1 036).
+    const hugeText = Array.from({ length: 120 }, (_, index) => `Строка ${index + 1}: сверьте размер по чертежу.`).join(' ');
+    const doc = {
+      ...bracketDocument,
+      steps: bracketDocument.steps.map((step, index) => ({
+        ...step,
+        workerText: index === 0 ? hugeText : step.workerText,
+        criticalChecks: Array.from({ length: 6 }, (_, check) => ({
+          id: `c${check}`,
+          label: `Размер ${check}`,
+          nominal: '45,002–45,018 мм',
+          acceptance: 'ширина допуска 0,016 мм, контроль калибром',
+          instrument: 'Калибр-пробка Ø20 H7',
+        })),
+      })),
+    };
+    const plan = buildInstructionPlan(ikGuideDocumentSchema.parse(doc));
+    for (const page of plan.pages) {
+      for (const block of page.blocks) {
+        const top = block.kind === 'line' ? Math.min(block.y1, block.y2) : block.y;
+        if (top >= PAGE.footerBaseline - 5) {
+          continue; // сам колонтитул живёт ниже тела листа — это норма
+        }
+        const bottom =
+          block.kind === 'line'
+            ? Math.max(block.y1, block.y2)
+            : block.kind === 'text'
+              ? block.y + blockHeight(block.lines, block.size)
+              : block.y + block.h;
+        expect(bottom, `блок ${block.kind} на стр. ${page.index}`).toBeLessThanOrEqual(PAGE.bodyBottom + 0.01);
+      }
+    }
+    const stepText = plan.pages
+      .flatMap((page) => page.blocks)
+      .filter((block): block is PlanText => block.kind === 'text' && 'target' in block && block.target?.type === 'step-text');
+    expect(stepText[0]?.lines.join(' ')).toContain('…');
+  });
+
+  it('таблица позиций с огромными строками не наезжает на колонтитул', () => {
+    const doc = {
+      ...bracketDocument,
+      bom: Array.from({ length: 24 }, (_, index) => ({
+        id: `b${index}`,
+        name: `Болт с шестигранной головкой М${8 + index} длиной ${30 + index} мм, оцинкованный, повышенной прочности`,
+        size: `М${8 + index} × ${30 + index}`,
+        quantity: 1 + index,
+        note: 'по ГОСТ 7798-70, затяжка динамометрическим ключом 24 Н·м, момент контролировать по паспорту',
+        kind: 'fastener' as const,
+        icon: 'bolt' as const,
+      })),
+      tools: bracketDocument.tools,
+    };
+    const plan = buildInstructionPlan(ikGuideDocumentSchema.parse(doc));
+    for (const page of plan.pages) {
+      for (const block of page.blocks) {
+        if (block.kind !== 'text' || block.y >= PAGE.footerBaseline - 5) {
+          continue; // колонтитул
+        }
+        const height = blockHeight(block.lines, block.size);
+        expect(block.y + height, `стр. ${page.index}`).toBeLessThanOrEqual(PAGE.bodyBottom + 0.01);
+      }
+    }
   });
 });

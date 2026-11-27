@@ -760,7 +760,6 @@ def main() -> None:
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    rng = random.Random(args.seed)
     index: list[dict] = []
 
     # Пропорции: вектор дешёвый и быстрый, растровые категории тяжелее — их меньше.
@@ -774,12 +773,14 @@ def main() -> None:
         ("phone_photo", category_phone_photo, int(budget * 0.12)),
         ("pdf_family", category_pdf_family, int(budget * 0.15)),
     ]
+    # Свой генератор на каждую категорию: правка одной категории не сдвигает остальные,
+    # а прогон остаётся воспроизводимым по одному `--seed`.
     for name, function, amount in plan:
         print(f"▸ {name}: {amount}")
-        function(out_dir, index, rng, amount)
+        function(out_dir, index, random.Random(f"{args.seed}:{name}"), amount)
 
     print(f"▸ fuzz: {args.fuzz}")
-    category_fuzz(out_dir, index, rng, args.fuzz)
+    category_fuzz(out_dir, index, random.Random(f"{args.seed}:fuzz"), args.fuzz)
 
     index_path = out_dir / "index.jsonl"
     with index_path.open("w", encoding="utf-8") as handle:

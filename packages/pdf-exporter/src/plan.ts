@@ -183,6 +183,26 @@ interface TextStyle {
   target?: PlanTarget;
 }
 
+/**
+ * Подрезает строки блока под доступную высоту, оставляя многоточие.
+ *
+ * Нужен для «одного шага на лист»: если распознанный текст распух (десятки строк мусора из OCR),
+ * вёрстка обязана остаться в пределах листа. Наложение текста на колонтитул и выход за край
+ * бумаги хуже, чем честное «…» в конце.
+ */
+function trimToHeight(lines: string[], maxHeight: number, size: number): string[] {
+  if (lines.length === 0 || blockHeight(lines, size) <= maxHeight) {
+    return lines;
+  }
+  const kept = [...lines];
+  while (kept.length > 1 && blockHeight(kept, size) > maxHeight) {
+    kept.pop();
+  }
+  const last = kept[kept.length - 1] ?? '';
+  kept[kept.length - 1] = `${last.replace(/…$/, '')}…`;
+  return kept;
+}
+
 function text(flow: Flow, x: number, y: number, width: number, value: string, style: TextStyle): number {
   const weight = style.weight ?? 'normal';
   const lines = wrapText(value, width, style.size, weight);
@@ -277,53 +297,103 @@ function sectionTitle(flow: Flow, label: string): void {
 interface RowLayout {
   height: number;
   draw: (flow: Flow, x: number, y: number, width: number) => void;
+  /** Ужимает строку до `maxHeight` (многоточие вместо выхода за лист). */
+  fit: (maxHeight: number) => RowLayout;
 }
 
-function layoutBomRow(item: BomItem, width: number): RowLayout {
-  const nameLines = wrapText(`${item.name}${item.standard ? ` · ${item.standard}` : ''}`, width - 18, 8.6, 'bold');
+function layoutBomRow(item: BomItem, width: number, maxHeight = Number.POSITIVE_INFINITY): RowLayout {
+  const title = `${item.name}${item.standard ? ` · ${item.standard}` : ''}`;
   const metaParts = [item.size, `${item.quantity} шт.`];
   if (item.note) {
     metaParts.push(item.note);
   }
-  const metaLines = wrapText(metaParts.join(' · '), width - 18, 8, 'normal');
+  const meta = metaParts.join(' · ');
+  const nameLines = trimToHeight(wrapText(title, width - 18, 8.6, 'bold'), maxHeight - 2.4 - lineHeight(8), 8.6);
+  const metaLines = trimToHeight(
+    wrapText(meta, width - 18, 8, 'normal'),
+    Math.max(lineHeight(8), maxHeight - blockHeight(nameLines, 8.6) - 2.4),
+    8,
+  );
   const height = blockHeight(nameLines, 8.6) + blockHeight(metaLines, 8) + 2.4;
   return {
     height,
     draw: (flow, x, y, rowWidth) => {
       rect(flow, x, y + 1.2, 2.6, 2.6, { fill: COLORS.accentSoft, radius: 0.8 });
-      text(flow, x + 6, y, rowWidth - 6, `${item.name}${item.standard ? ` · ${item.standard}` : ''}`, {
+      flow.add({
+        kind: 'text',
+        x: x + 6,
+        y,
+        w: rowWidth - 6,
+        lines: nameLines,
         size: 8.6,
         weight: 'bold',
+        color: COLORS.ink,
+        align: 'left',
       });
-      text(flow, x + 6, y + blockHeight(nameLines, 8.6), rowWidth - 6, metaParts.join(' · '), {
-        size: 8,
-        color: COLORS.gray,
-      });
+      if (metaLines.length > 0) {
+        flow.add({
+          kind: 'text',
+          x: x + 6,
+          y: y + blockHeight(nameLines, 8.6),
+          w: rowWidth - 6,
+          lines: metaLines,
+          size: 8,
+          weight: 'normal',
+          color: COLORS.gray,
+          align: 'left',
+        });
+      }
     },
+    fit: (maxHeightLimit) => layoutBomRow(item, width, maxHeightLimit),
   };
 }
 
-function layoutToolRow(tool: GuideTool, width: number): RowLayout {
+function layoutToolRow(tool: GuideTool, width: number, maxHeight = Number.POSITIVE_INFINITY): RowLayout {
   const title = tool.size ? `${tool.name} · ${tool.size}` : tool.name;
-  const titleLines = wrapText(title, width - 18, 8.6, 'bold');
+  const titleLines = trimToHeight(wrapText(title, width - 18, 8.6, 'bold'), maxHeight - 2.4 - lineHeight(7.8), 8.6);
   const purposeLines = wrapText(tool.purpose, width - 18, 7.8, 'normal');
-  const height = blockHeight(titleLines, 8.6) + blockHeight(purposeLines, 7.8) + 2.4;
+  const purposeLinesFitted = trimToHeight(
+    purposeLines,
+    Math.max(lineHeight(7.8), maxHeight - blockHeight(titleLines, 8.6) - 2.4),
+    7.8,
+  );
+  const height = blockHeight(titleLines, 8.6) + blockHeight(purposeLinesFitted, 7.8) + 2.4;
   return {
     height,
     draw: (flow, x, y, rowWidth) => {
       rect(flow, x, y + 1.2, 2.6, 2.6, { fill: COLORS.chip, stroke: COLORS.line, radius: 0.8 });
-      text(flow, x + 6, y, rowWidth - 6, title, { size: 8.6, weight: 'bold' });
-      text(flow, x + 6, y + blockHeight(titleLines, 8.6), rowWidth - 6, tool.purpose, {
-        size: 7.8,
-        color: COLORS.gray,
+      flow.add({
+        kind: 'text',
+        x: x + 6,
+        y,
+        w: rowWidth - 6,
+        lines: titleLines,
+        size: 8.6,
+        weight: 'bold',
+        color: COLORS.ink,
+        align: 'left',
       });
+      if (purposeLinesFitted.length > 0) {
+        flow.add({
+          kind: 'text',
+          x: x + 6,
+          y: y + blockHeight(titleLines, 8.6),
+          w: rowWidth - 6,
+          lines: purposeLinesFitted,
+          size: 7.8,
+          weight: 'normal',
+          color: COLORS.gray,
+          align: 'left',
+        });
+      }
     },
+    fit: (maxHeightLimit) => layoutToolRow(tool, width, maxHeightLimit),
   };
 }
 
 /**
  * Две колонки на одном уровне: «Что понадобится» и «Возьми инструмент».
- * Длинные списки переносятся на следующий лист порциями — ничего не обрезается.
+ * Длинные списки переносятся на следующий лист; слишком высокая строка сокращается.
  */
 function drawTwoColumns(
   flow: Flow,
@@ -352,8 +422,16 @@ function drawTwoColumns(
       }
       return chosen;
     };
-    const leftPortion = take(left);
-    const rightPortion = take(right);
+    let leftPortion = take(left);
+    let rightPortion = take(right);
+    // Одна огромная строка (длинное наименование с ГОСТ и примечанием) раньше «пробивала»
+    // низ листа и накладывалась на колонтитул. Ужимаем её до доступной высоты.
+    if (leftPortion.length === 1 && leftPortion[0]!.height > available) {
+      leftPortion = [leftPortion[0]!.fit(available)];
+    }
+    if (rightPortion.length === 1 && rightPortion[0]!.height > available) {
+      rightPortion = [rightPortion[0]!.fit(available)];
+    }
 
     if (!first) {
       flow.newPage();
@@ -586,18 +664,26 @@ interface StepLayout {
 function layoutStep(step: GuideStep, input: IllustrationInput | undefined): StepLayout {
   const titleWidth = PAGE.contentWidth - 20;
   const titleLines = wrapText(step.title, titleWidth, 12.5, 'bold');
-  const textLines = wrapText(step.workerText, PAGE.contentWidth - ILLUSTRATION_W - 10, 8.6, 'normal');
+  let textLines = wrapText(step.workerText, PAGE.contentWidth - ILLUSTRATION_W - 10, 8.6, 'normal');
   const antiLines = step.antiError
     ? wrapText(step.antiError.text, PAGE.contentWidth - 10, 8.4, 'normal')
     : [];
 
   const titleHeight = blockHeight(titleLines, 12.5);
-  const bodyHeight = Math.max(
-    ILLUSTRATION_H,
-    blockHeight(textLines, 8.6) + (input?.caption ? lineHeight(7) + 1 : 0),
-  );
+  const captionHeight = input?.caption ? lineHeight(7) + 1 : 0;
   const checksHeight = step.criticalChecks.length > 0 ? 5 + checksTableHeight(step.criticalChecks) : 0;
   const antiHeight = step.antiError ? blockHeight(antiLines, 8.4) + 9 : 0;
+
+  // Лист не резиновый: считаем, сколько места реально остаётся на текст шага, и подрезаем его
+  // многоточием. Иначе распознанный «простыня» уезжает под колонтитул и за край бумаги.
+  const bodyLimit = PAGE.bodyBottom - PAGE.bodyTop;
+  const textBudget = Math.max(
+    lineHeight(8.6),
+    bodyLimit - STEP_GAP - titleHeight - 2 - checksHeight - antiHeight - captionHeight,
+  );
+  textLines = trimToHeight(textLines, textBudget, 8.6);
+
+  const bodyHeight = Math.max(ILLUSTRATION_H, blockHeight(textLines, 8.6) + captionHeight);
 
   return {
     step,
@@ -646,10 +732,19 @@ function drawStep(flow: Flow, layout: StepLayout, input: IllustrationInput | und
   });
   const textX = PAGE.margin + ILLUSTRATION_W + 8;
   const textWidth = PAGE.contentWidth - ILLUSTRATION_W - 8;
-  const textHeight = text(flow, textX, y, textWidth, step.workerText, {
+  flow.add({
+    kind: 'text',
+    x: textX,
+    y,
+    w: textWidth,
+    lines: layout.textLines,
     size: 8.6,
+    weight: 'normal',
+    color: COLORS.ink,
+    align: 'left',
     target: { type: 'step-text', stepId: step.id },
   });
+  const textHeight = blockHeight(layout.textLines, 8.6);
   if (layout.caption) {
     text(flow, textX, y + textHeight + 1, textWidth, layout.caption, { size: 7, color: COLORS.gray });
   }
@@ -742,7 +837,15 @@ function drawChecklist(flow: Flow, doc: IkGuideDocument): void {
 function drawFooters(flow: Flow, doc: IkGuideDocument): void {
   const total = flow.pages.length;
   flow.pages.forEach((page, index) => {
-    hairline(flow, PAGE.margin, PAGE.footerBaseline - 4, PAGE.contentWidth, COLORS.chip);
+    page.blocks.push({
+      kind: 'line',
+      x1: PAGE.margin,
+      y1: PAGE.footerBaseline - 4,
+      x2: PAGE.margin + PAGE.contentWidth,
+      y2: PAGE.footerBaseline - 4,
+      color: COLORS.chip,
+      lineWidth: 0.2,
+    });
     // Колонтитул пишем напрямую в страницу: `flow.y` к этому моменту уже не важен.
     const left = ellipsize(
       `${doc.metadata.drawingCode} · ${doc.metadata.title}`,

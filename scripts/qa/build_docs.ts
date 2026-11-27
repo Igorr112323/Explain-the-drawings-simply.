@@ -23,19 +23,39 @@ interface Arguments {
   vision: string;
   pdf: string;
   stats: string;
+  /** Порция: `--chunk 3/6` — третья шестая файлов по алфавиту. */
+  chunk: { index: number; total: number };
+  append: boolean;
 }
 
 function parseArguments(argv: readonly string[]): Arguments {
-  const result: Arguments = { vision: 'qa/output/vision', pdf: 'qa/output/pdf', stats: 'qa/output/stats.jsonl' };
+  const result: Arguments = {
+    vision: 'qa/output/vision',
+    pdf: 'qa/output/pdf',
+    stats: 'qa/output/stats.jsonl',
+    chunk: { index: 0, total: 1 },
+    append: false,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
     const value = argv[index + 1];
+    // Флаг без значения разбираем до общей проверки пары «ключ + значение».
+    if (key === '--append') {
+      result.append = true;
+      continue;
+    }
     if (!key || !value) {
       continue;
     }
     if (key === '--vision') result.vision = value;
     if (key === '--pdf') result.pdf = value;
     if (key === '--stats') result.stats = value;
+    if (key === '--chunk') {
+      const [index, total] = value.split('/').map((part) => Number.parseInt(part, 10));
+      if (Number.isFinite(index) && Number.isFinite(total) && total > 0) {
+        result.chunk = { index, total };
+      }
+    }
   }
   return result;
 }
@@ -170,7 +190,10 @@ async function main(): Promise<void> {
 const args = parseArguments(process.argv.slice(2));
 mkdirSync(args.pdf, { recursive: true });
 
-const files = readdirSync(args.vision).filter((name) => name.endsWith('.json')).sort();
+const allFiles = readdirSync(args.vision).filter((name) => name.endsWith('.json')).sort();
+// jsPDF и svg2pdf держат память до конца процесса: на 1 000 PDF Node получал SIGKILL от OOM.
+// Поэтому прогон идёт порциями по отдельным процессам, а статистика дописывается.
+const files = allFiles.filter((_, position) => position % args.chunk.total === args.chunk.index);
 const lines: string[] = [];
 let pdfs = 0;
 
@@ -278,7 +301,11 @@ for (const file of files) {
   lines.push(JSON.stringify(record));
 }
 
-writeFileSync(args.stats, `${lines.join('\n')}\n`, 'utf8');
+if (args.append) {
+  writeFileSync(args.stats, `${lines.map((line) => `${line}\n`).join('')}`, { encoding: 'utf8', flag: 'a' });
+} else {
+  writeFileSync(args.stats, `${lines.join('\n')}\n`, 'utf8');
+}
 console.log(`build_docs: ${files.length} кейсов, PDF: ${pdfs}`);
 }
 

@@ -305,6 +305,7 @@ def main() -> None:
     try:
         results: list[dict] = []
         started_all = time.time()
+        rss_peak_mb = 0.0
         if args.reuse_vision:
             results = [json.loads(line) for line in (out / "results.jsonl").read_text().splitlines() if line.strip()]
             results = results[: len(cases)]
@@ -356,21 +357,53 @@ def main() -> None:
                 if not alive:
                     print(f"  ! сервер умер на {index}-м кейсе ({path.name})")
             if index % 50 == 0:
-                print(f"  … {index}/{len(cases)}  rss={rss_mb(server.pid) if server else 0} МБ")
+                current_rss = rss_mb(server.pid) if server else 0.0
+                rss_peak_mb = max(rss_peak_mb, current_rss)
+                print(f"  … {index}/{len(cases)}  rss={current_rss} МБ")
 
         vision_seconds = time.time() - started_all
+        (out / "results.jsonl").write_text(
+            "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in results), encoding="utf-8"
+        )
         print(f"✓ vision: {len(results)} кейсов за {vision_seconds:.1f} с")
+
+        # Движок держит в памяти до 1,4 ГБ страниц: его надо остановить до сборки PDF,
+        # иначе Node с jsPDF и Python вместе упираются в OOM (SIGKILL на ~290-м PDF).
+        if server is not None:
+            server.terminate()
+            try:
+                server.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                server.kill()
+            server = None
 
         # ------------------------------------------------------------- документы и PDF
         stats: list[dict] = []
         if not args.skip_node:
             bundle(ROOT / "scripts" / "qa" / "build_docs.ts", out / "build_docs.cjs")
             print("▸ build_docs (builder + pdf-exporter)…")
-            subprocess.run(
-                ["node", str(out / "build_docs.cjs"), "--vision", str(vision_dir), "--pdf", str(pdf_dir), "--stats", str(out / "stats.jsonl")],
-                check=True,
-                cwd=ROOT,
-            )
+            chunks = 6
+            stats_path = out / "stats.jsonl"
+            if stats_path.exists():
+                stats_path.unlink()
+            for chunk in range(chunks):
+                subprocess.run(
+                    [
+                        "node",
+                        str(out / "build_docs.cjs"),
+                        "--vision",
+                        str(vision_dir),
+                        "--pdf",
+                        str(pdf_dir),
+                        "--stats",
+                        str(stats_path),
+                        "--chunk",
+                        f"{chunk}/{chunks}",
+                        "--append",
+                    ],
+                    check=True,
+                    cwd=ROOT,
+                )
             stats = [json.loads(line) for line in (out / "stats.jsonl").read_text().splitlines() if line.strip()]
 
         # ------------------------------------------------------------- проверка PDF
@@ -403,6 +436,7 @@ def main() -> None:
             "pdf": summarize_pdf(pdf_reports),
             "gost": gost,
             "rssMb": rss_mb(server.pid) if server else 0,
+            "rssPeakMb": round(rss_peak_mb, 1),
             "visionSeconds": round(vision_seconds, 1),
         }
         (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
