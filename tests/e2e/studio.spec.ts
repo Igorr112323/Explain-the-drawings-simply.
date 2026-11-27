@@ -114,6 +114,9 @@ test('правка шага на листе отменяется кнопкой 
   await page.keyboard.press('Control+Enter');
 
   await expect(page.locator('.sheets')).toContainText('маркеру');
+  // The edit dialog is modal: close it before using a toolbar action behind it.
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
   await page.getByLabel('Отменить последнее действие').click();
   await expect(page.locator('.sheets')).not.toContainText('маркеру');
 });

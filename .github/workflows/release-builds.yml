@@ -244,7 +244,7 @@ jobs:
           # with CREATE_NO_WINDOW. --collect-all bundles the OCR models.
           # RapidOCR и данные onnxruntime лежат внутри пакетов, без них OCR пустой.
           python -m PyInstaller --noconfirm --onefile --console --name ikguide-vision `
-            --paths . --collect-submodules app `
+            --paths . --collect-submodules app --collect-all pytesseract `
             --collect-all rapidocr_onnxruntime --collect-submodules onnxruntime `
             --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto `
             --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto `
