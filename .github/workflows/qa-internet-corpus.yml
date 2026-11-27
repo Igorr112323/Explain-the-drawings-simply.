@@ -1,5 +1,11 @@
 name: QA internet corpus
 on:
+  workflow_call:
+    inputs:
+      maximum:
+        type: string
+        default: '350'
+
   workflow_dispatch:
     inputs:
       maximum:

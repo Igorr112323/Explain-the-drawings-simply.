@@ -162,3 +162,29 @@ def test_tesseract_russian_required_in_ci():
     assert "деталь" in result, result
     assert "сталь" in result, result
     assert "46" in result, result
+
+
+def test_russian_archetypes_with_real_tesseract(tmp_path):
+    """These generated fixtures exercise real OCR; absence of Russian data fails CI."""
+    import importlib.util
+    import os
+    from pathlib import Path
+    from app.ocr import TesseractOcrEngine
+    if not os.environ.get('IKGUIDE_REQUIRE_RUSSIAN_OCR'):
+        pytest.skip('requires Russian Tesseract')
+    generator = Path(__file__).resolve().parents[3] / 'scripts' / 'qa' / 'generate_archetypes.py'
+    spec = importlib.util.spec_from_file_location('qa_archetypes', generator)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    module.generate(tmp_path)
+    engine = TesseractOcrEngine()
+    expected = {
+        'archetype_a.png': ['жаровня', 'сталь', 'спереди', 'сбоку', '600', '170'],
+        'archetype_b.png': ['деталь', 'сталь', 'мами', '46', '110', '10'],
+        'archetype_c.png': ['нижняя', 'верхняя', 'опора', 'стропило', '2500', '2100'],
+    }
+    for name, tokens in expected.items():
+        image = np.array(Image.open(tmp_path / name).convert('RGB'))[:, :, ::-1].copy()
+        result = ' '.join(line.text for line in engine.recognize(image)).casefold()
+        for token in tokens:
+            assert token in result, f'{name}: missing {token!r}, got {result!r}'

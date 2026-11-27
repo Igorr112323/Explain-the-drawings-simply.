@@ -219,13 +219,20 @@ jobs:
 
       - name: Install Tesseract and language data
         run: |
-          choco install tesseract --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $dir = 'C:\Program Files\Tesseract-OCR'
-          if (!(Test-Path "$dir\tesseract.exe")) { throw 'Tesseract installation not found' }
-          foreach ($lang in @('eng','rus')) {
-            gh api -H 'Accept: application/vnd.github.raw+json' "repos/tesseract-ocr/tessdata_fast/contents/$lang.traineddata" > "$dir\tessdata\$lang.traineddata"
-            if ($LASTEXITCODE -ne 0) { throw "Could not download $lang traineddata" }
+          try {
+            choco install tesseract --yes --no-progress 2>&1 | Tee-Object -FilePath C:\ikguide\tesseract-install.log
+            if ($LASTEXITCODE -ne 0) { throw "Chocolatey failed: $LASTEXITCODE" }
+            $dir = 'C:\Program Files\Tesseract-OCR'
+            if (!(Test-Path "$dir\tesseract.exe")) { throw 'Tesseract installation not found' }
+            foreach ($lang in @('eng','rus')) {
+              gh api -H 'Accept: application/vnd.github.raw+json' "repos/tesseract-ocr/tessdata_fast/contents/$lang.traineddata" > "$dir\tessdata\$lang.traineddata"
+              if ($LASTEXITCODE -ne 0) { throw "Could not download $lang traineddata" }
+            }
+          } catch {
+            $detail = ($_ | Out-String) + (Get-Content C:\ikguide\tesseract-install.log -Tail 15 -ErrorAction SilentlyContinue | Out-String)
+            $detail = $detail.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            Write-Host "::error title=Tesseract install::$detail"
+            throw
           }
         env:
           GH_TOKEN: ${{ github.token }}

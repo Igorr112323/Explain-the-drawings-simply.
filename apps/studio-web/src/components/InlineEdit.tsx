@@ -22,6 +22,8 @@ export function InlineEdit({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
+  // Enter can synchronously trigger blur on unmount. Commit only once per edit session.
+  const committedRef = useRef(false);
 
   useEffect(() => {
     if (!editing) {
@@ -37,6 +39,8 @@ export function InlineEdit({
   }, [editing]);
 
   const commit = () => {
+    if (committedRef.current) return;
+    committedRef.current = true;
     setEditing(false);
     const clean = draft.trim();
     if (clean.length > 0 && clean !== value) {
@@ -49,7 +53,7 @@ export function InlineEdit({
       <button
         type="button"
         className={`inline-edit ${className ?? ''}`}
-        onClick={() => setEditing(true)}
+        onClick={() => { committedRef.current = false; setEditing(true); }}
         aria-label={`${ariaLabel}: изменить`}
         title="Нажмите, чтобы изменить"
       >

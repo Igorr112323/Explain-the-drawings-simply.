@@ -13,6 +13,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The new workflow can only be directly dispatched after it exists on the default branch.
+  # Until then, manually dispatch this existing CI workflow on the working branch.
+  internet-corpus:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/qa-internet-corpus.yml
+    with:
+      maximum: '350'
+
   web-and-tests:
     name: Web · typecheck · tests · build
     runs-on: ubuntu-latest
@@ -80,7 +88,20 @@ jobs:
 
       - name: pytest vision-api
         working-directory: services/vision-api
-        run: python -m pytest -q
+        run: |
+          set +e
+          python -m pytest -q > pytest.log 2>&1
+          result=$?
+          cat pytest.log
+          if [ "$result" -ne 0 ]; then
+            python - <<'PY'
+          from pathlib import Path
+          log = Path('pytest.log').read_text(errors='replace')[-14000:]
+          escaped = log.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print('::error title=Vision pytest::' + escaped)
+          PY
+          fi
+          exit "$result"
         env:
           IKGUIDE_REQUIRE_RUSSIAN_OCR: '1'
 
